@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently -n server,client -c blue,green \"tsx server.ts 2>&1 | tee logs/server.log\" \"vite 2>&1 | tee logs/client.log\"",
-    "dev:server": "tsx server.ts 2>&1 | tee logs/server.log",
+    "dev": "concurrently -n server,client -c blue,green \"tsx --watch server.ts 2>&1 | tee logs/server.log\" \"vite 2>&1 | tee logs/client.log\"",
+    "dev:server": "tsx --watch server.ts 2>&1 | tee logs/server.log",
     "dev:client": "vite 2>&1 | tee logs/client.log",
     "build": "vite build",
     "build:all": "pnpm build",
@@ -12,7 +12,8 @@
     "prod": "pnpm build && concurrently -n server,client -c blue,green \"NODE_ENV=production tsx server.ts\" \"vite preview --port 5173\"",
     "lint": "eslint",
     "logs:server": "tail -f logs/server.log",
-    "logs:client": "tail -f logs/client.log"
+    "logs:client": "tail -f logs/client.log",
+    "reload": "touch server.ts"
   },
   "dependencies": {
     "argon2": "^0.44.0",
