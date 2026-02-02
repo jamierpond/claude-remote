@@ -114,13 +114,15 @@ export function spawnClaude(
   });
 
   proc.on('close', (code, signal) => {
+    clearTimeout(timeout);
     console.log('[claude] CLOSED - code:', code, 'signal:', signal);
     if (buffer.trim()) {
       processLine(buffer);
     }
     if (code !== 0 && code !== null) {
-      console.error('[claude] Non-zero exit code:', code);
-      onEvent({ type: 'error', text: `Process exited with code ${code}` });
+      const err = `[claude] FATAL: Process exited with code ${code}, signal: ${signal}`;
+      console.error(err);
+      onEvent({ type: 'error', text: err });
     }
     onEvent({ type: 'done' });
   });
