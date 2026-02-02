@@ -20,7 +20,7 @@ dependencies:
   http: ^1.1.0
   
   # Crypto
-  cryptography: ^2.7.0
+  pointycastle: ^3.9.1  # Pure Dart P-256 ECDH + AES-GCM
   
   # Storage
   flutter_secure_storage: ^9.0.0

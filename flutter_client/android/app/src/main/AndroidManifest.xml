@@ -1,4 +1,27 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Network permissions -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+
+    <!-- Camera for QR scanning -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
+
+    <!-- Biometric auth -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
+    <uses-permission android:name="android.permission.USE_FINGERPRINT"/>
+
+    <!-- Vibration for notifications -->
+    <uses-permission android:name="android.permission.VIBRATE"/>
+
+    <!-- Wake lock for background tasks -->
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+
+    <!-- Notifications -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
     <application
         android:label="claude_remote"
         android:name="${applicationName}"
