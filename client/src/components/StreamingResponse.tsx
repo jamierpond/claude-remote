@@ -72,16 +72,44 @@ function renderInline(text: string): React.ReactNode[] {
     if (linkMatch) {
       parts.push(
         <a key={key++} href={linkMatch[2]} target="_blank" rel="noopener noreferrer"
-           className="text-blue-400 underline hover:text-blue-300">
+           className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 underline decoration-blue-400/50 hover:decoration-blue-300 underline-offset-2">
           {linkMatch[1]}
+          <svg className="w-3 h-3 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M4.25 5.5a.75.75 0 00-.75.75v8.5c0 .414.336.75.75.75h8.5a.75.75 0 00.75-.75v-4a.75.75 0 011.5 0v4A2.25 2.25 0 0112.75 17h-8.5A2.25 2.25 0 012 14.75v-8.5A2.25 2.25 0 014.25 4h5a.75.75 0 010 1.5h-5zm7.25-1.25a.75.75 0 01.75-.75h4.5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0V6.31l-5.72 5.72a.75.75 0 11-1.06-1.06l5.72-5.72h-2.69a.75.75 0 01-.75-.75z" clipRule="evenodd" />
+          </svg>
         </a>
       );
       remaining = remaining.slice(linkMatch[0].length);
       continue;
     }
 
-    // Regular text until next special char
-    const nextSpecial = remaining.search(/[*_`\[]/);
+    // Bare URL: https://... or http://...
+    const urlMatch = remaining.match(/^(https?:\/\/[^\s<>)"']+)/);
+    if (urlMatch) {
+      const url = urlMatch[1];
+      // Clean trailing punctuation that's likely not part of URL
+      const cleanUrl = url.replace(/[.,;:!?)]+$/, '');
+      const trailingPunct = url.slice(cleanUrl.length);
+      // Show shortened display text for long URLs
+      const displayUrl = cleanUrl.length > 40
+        ? cleanUrl.slice(0, 35) + '...'
+        : cleanUrl;
+      parts.push(
+        <a key={key++} href={cleanUrl} target="_blank" rel="noopener noreferrer"
+           className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 underline decoration-blue-400/50 hover:decoration-blue-300 underline-offset-2 break-all">
+          {displayUrl}
+          <svg className="w-3 h-3 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M4.25 5.5a.75.75 0 00-.75.75v8.5c0 .414.336.75.75.75h8.5a.75.75 0 00.75-.75v-4a.75.75 0 011.5 0v4A2.25 2.25 0 0112.75 17h-8.5A2.25 2.25 0 012 14.75v-8.5A2.25 2.25 0 014.25 4h5a.75.75 0 010 1.5h-5zm7.25-1.25a.75.75 0 01.75-.75h4.5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0V6.31l-5.72 5.72a.75.75 0 11-1.06-1.06l5.72-5.72h-2.69a.75.75 0 01-.75-.75z" clipRule="evenodd" />
+          </svg>
+        </a>
+      );
+      if (trailingPunct) parts.push(trailingPunct);
+      remaining = remaining.slice(url.length);
+      continue;
+    }
+
+    // Regular text until next special char or URL
+    const nextSpecial = remaining.search(/[*_`\[]|https?:\/\//);
     if (nextSpecial === -1) {
       parts.push(remaining);
       break;
