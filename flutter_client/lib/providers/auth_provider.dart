@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
 import '../core/storage.dart';
 import '../core/crypto.dart';
 import '../core/websocket.dart';
@@ -154,14 +156,23 @@ class AuthNotifier extends StateNotifier<AuthState> {
     state = const AuthState();
   }
   
-  // HTTP helpers (simplified - use http package in real impl)
   Future<Map<String, dynamic>> _httpGet(String url) async {
-    // TODO: implement with http package
-    throw UnimplementedError();
+    final response = await http.get(Uri.parse(url));
+    if (response.statusCode != 200) {
+      throw Exception('HTTP ${response.statusCode}: ${response.body}');
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>;
   }
-  
+
   Future<Map<String, dynamic>> _httpPost(String url, Map<String, dynamic> body) async {
-    // TODO: implement with http package
-    throw UnimplementedError();
+    final response = await http.post(
+      Uri.parse(url),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('HTTP ${response.statusCode}: ${response.body}');
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>;
   }
 }

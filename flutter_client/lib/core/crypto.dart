@@ -3,44 +3,54 @@ import 'dart:typed_data';
 import 'package:cryptography/cryptography.dart';
 
 /// E2E encryption using ECDH key exchange + AES-256-GCM
-/// Compatible with the Node.js server implementation
+/// Compatible with the Node.js server implementation (uses P-256)
 class CryptoService {
-  final _ecdh = X25519();
+  final _ecdh = Ecdh.p256(length: 256);
   final _aes = AesGcm.with256bits();
-  
-  SimpleKeyPair? _keyPair;
+
+  EcKeyPair? _keyPair;
   SecretKey? _sharedSecret;
-  
+
   bool get hasSharedSecret => _sharedSecret != null;
-  
-  /// Generate a new ECDH key pair and return the public key as base64
+
+  /// Generate a new ECDH P-256 key pair and return the public key as base64
+  /// Returns the raw uncompressed public key (65 bytes: 0x04 || x || y)
   Future<String> generateKeyPair() async {
     _keyPair = await _ecdh.newKeyPair();
     final publicKey = await _keyPair!.extractPublicKey();
-    return base64Encode(publicKey.bytes);
+    // Export as uncompressed point format (what Web Crypto uses)
+    final bytes = Uint8List.fromList([0x04, ...publicKey.x, ...publicKey.y]);
+    return base64Encode(bytes);
   }
-  
-  /// Derive shared secret from server's public key
-  /// Server uses P-256, but we use X25519 for simplicity
-  /// NOTE: Server needs to support X25519 or we need to use pointycastle for P-256
+
+  /// Derive shared secret from server's public key (P-256)
   Future<void> deriveSharedSecret(String serverPublicKeyBase64) async {
     if (_keyPair == null) {
       throw StateError('Must call generateKeyPair first');
     }
-    
+
     final serverPublicKeyBytes = base64Decode(serverPublicKeyBase64);
-    final serverPublicKey = SimplePublicKey(
-      serverPublicKeyBytes,
-      type: KeyPairType.x25519,
+
+    // Parse uncompressed point format (0x04 || x || y)
+    if (serverPublicKeyBytes.length != 65 || serverPublicKeyBytes[0] != 0x04) {
+      throw ArgumentError('Invalid P-256 public key format');
+    }
+    final x = serverPublicKeyBytes.sublist(1, 33);
+    final y = serverPublicKeyBytes.sublist(33, 65);
+
+    final serverPublicKey = EcPublicKey(
+      x: x,
+      y: y,
+      type: KeyPairType.p256,
     );
-    
+
     // Derive shared secret via ECDH
     final sharedSecretKey = await _ecdh.sharedSecretKey(
       keyPair: _keyPair!,
       remotePublicKey: serverPublicKey,
     );
-    
-    // Hash with SHA-256 to get consistent 32-byte key (matches server)
+
+    // Hash with SHA-256 to get consistent 32-byte key (matches server/web client)
     final sharedSecretBytes = await sharedSecretKey.extractBytes();
     final hash = await Sha256().hash(sharedSecretBytes);
     _sharedSecret = SecretKey(hash.bytes);

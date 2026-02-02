@@ -76,7 +76,16 @@ class _PairScreenState extends ConsumerState<PairScreen> {
     final pathSegments = uri.pathSegments;
     if (pathSegments.length >= 2 && pathSegments[0] == 'pair') {
       final token = pathSegments[1];
-      final serverUrl = '${uri.scheme}://${uri.host}${uri.hasPort ? ':${uri.port}' : ''}';
+
+      // QR code contains client URL (port 5173), but API is on server (port 6767)
+      // For localhost, swap ports. For production, assume same host.
+      var serverUrl = '${uri.scheme}://${uri.host}';
+      if (uri.host == 'localhost' || uri.host == '127.0.0.1') {
+        // Local dev: client is 5173, server is 6767
+        serverUrl = '${uri.scheme}://${uri.host}:6767';
+      } else if (uri.hasPort) {
+        serverUrl = '${uri.scheme}://${uri.host}:${uri.port}';
+      }
 
       _pair(serverUrl, token);
     } else {
