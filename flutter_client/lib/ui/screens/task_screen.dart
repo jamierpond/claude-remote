@@ -287,17 +287,6 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
               ),
             ),
 
-          // Reset button
-          IconButton(
-            onPressed: () {
-              // TODO: implement reset
-            },
-            icon: const Icon(Icons.refresh, color: AppColors.textSecondary, size: 20),
-            tooltip: 'Reset',
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-          ),
-
           // Dev reload button (web only)
           if (kIsWeb)
             IconButton(

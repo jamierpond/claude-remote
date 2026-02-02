@@ -17,6 +17,17 @@
 - `ai-server.pond.audio` = API server (WebSocket, REST)
 - Flutter client must map client URLs to server URLs for API calls
 
+### After Code Changes: ALWAYS VERIFY
+- After making Flutter/Dart changes, run `flutter analyze` to check for errors
+- Run `flutter build web` to verify it compiles
+- Use `make reload` to hot-reload connected clients
+- Don't assume changes work - verify they build before moving on
+
+### UI: NO PLACEHOLDER/INOP ELEMENTS
+- Never add UI elements (buttons, icons, etc.) that don't work yet
+- No "TODO: implement" buttons - either implement it fully or don't add it
+- Confusing inop UI is worse than no UI
+
 ## Overview
 Mobile chat interface for local Claude CLI with E2E encryption. Personal use - access Claude from phone via Cloudflare tunnel.
 
