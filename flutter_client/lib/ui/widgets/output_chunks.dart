@@ -4,6 +4,7 @@ import '../../models/task.dart';
 import '../theme/colors.dart';
 import '../theme/spacing.dart';
 import '../theme/typography.dart';
+import 'rich_text_content.dart';
 
 class OutputChunks extends StatelessWidget {
   final List<OutputChunk> chunks;
@@ -130,9 +131,9 @@ class _ChunkCard extends StatelessWidget {
               ),
               AppSpacing.gapVerticalXs,
 
-              // Content
-              SelectableText(
-                chunk.text,
+              // Content with clickable links
+              RichTextContent(
+                text: chunk.text,
                 style: const TextStyle(
                   fontSize: 14,
                   height: 1.6,

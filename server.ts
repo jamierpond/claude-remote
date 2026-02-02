@@ -52,6 +52,22 @@ const activeJobs: Map<string, AbortController> = new Map();
 // Track connected WebSockets per device
 const connectedClients: Map<string, WebSocket> = new Map();
 
+// Broadcast reload message to all connected clients (for dev hot reload)
+function broadcastReload() {
+  console.log('[dev] Broadcasting reload to', connectedClients.size, 'clients');
+  const devices = loadDevices();
+  for (const [deviceId, ws] of connectedClients.entries()) {
+    if (ws.readyState === WebSocket.OPEN) {
+      const device = devices.find(d => d.id === deviceId);
+      if (device) {
+        const encrypted = encrypt(JSON.stringify({ type: 'reload' }), device.sharedSecret);
+        ws.send(JSON.stringify(encrypted));
+        console.log(`[dev] Sent reload to device ${deviceId}`);
+      }
+    }
+  }
+}
+
 // Helper to create job key
 function jobKey(deviceId: string, projectId?: string): string {
   return projectId ? `${deviceId}:${projectId}` : deviceId;
@@ -245,6 +261,33 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       deviceCount: devices.length,
       pairingUrl: serverState.pairingToken ? `${clientUrl}/pair/${serverState.pairingToken}` : null,
     });
+  }
+
+  // API: Dev reload - broadcasts reload message to all connected clients
+  if (pathname === '/api/dev/reload' && method === 'POST') {
+    broadcastReload();
+    return json(res, { ok: true, clients: connectedClients.size });
+  }
+
+  // API: Dev full reload - triggers Flutter hot restart then broadcasts reload
+  if (pathname === '/api/dev/full-reload' && method === 'POST') {
+    try {
+      // Send SIGUSR2 to Flutter process for hot restart
+      const pidFile = join(process.cwd(), 'logs', 'flutter.pid');
+      if (existsSync(pidFile)) {
+        const pid = readFileSync(pidFile, 'utf-8').trim();
+        process.kill(parseInt(pid), 'SIGUSR2');
+        console.log('[dev] Sent SIGUSR2 to Flutter process', pid);
+      }
+      // Wait for Flutter to rebuild, then broadcast reload
+      setTimeout(() => {
+        broadcastReload();
+      }, 2000);
+      return json(res, { ok: true, message: 'Flutter restart triggered, reload will broadcast in 2s' });
+    } catch (e) {
+      console.error('[dev] Full reload failed:', e);
+      return json(res, { ok: false, error: String(e) }, 500);
+    }
   }
 
   // API: Get conversation history

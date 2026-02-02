@@ -1,8 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'crypto.dart';
+
+// Conditional import for web reload
+import 'web_reload_stub.dart' if (dart.library.html) 'web_reload.dart' as web_reload;
 
 enum ConnectionState { disconnected, connecting, connected, authenticated }
 
@@ -141,7 +145,14 @@ class WebSocketManager {
       if (message.type == 'auth_ok') {
         _setState(ConnectionState.authenticated);
       }
-      
+
+      // Handle dev reload - refresh the page on web
+      if (message.type == 'reload') {
+        print('[WS] Received reload signal - refreshing page');
+        web_reload.reloadPage();
+        return;
+      }
+
       _messageController.add(message);
     } catch (e) {
       print('Failed to handle message: $e');

@@ -43,11 +43,14 @@ start:
 # Trigger reload for all dev processes
 # - Touches server.ts to trigger tsx --watch restart
 # - Sends SIGUSR2 to Flutter process for hot restart (rebuilds app)
+# - Calls /api/dev/reload to broadcast reload message to connected clients
 reload:
 	@echo "Triggering reload..."
 	@touch server.ts
 	@if [ -f logs/flutter.pid ]; then kill -USR2 $$(cat logs/flutter.pid) 2>/dev/null || true; fi
-	@echo "Done - refresh browser to see Flutter changes"
+	@sleep 2
+	@curl -s -X POST http://localhost:3001/api/dev/reload > /dev/null 2>&1 || true
+	@echo "Done - clients will auto-refresh"
 
 # Kill all dev processes
 kill:
@@ -56,6 +59,9 @@ kill:
 	@pkill -f "vite" 2>/dev/null || true
 	@if [ -f logs/flutter.pid ]; then kill $$(cat logs/flutter.pid) 2>/dev/null || true; rm -f logs/flutter.pid; fi
 	@pkill -f "flutter.*run" 2>/dev/null || true
+	@pkill -f "dart.*flutter" 2>/dev/null || true
+	@fuser -k 5173/tcp 2>/dev/null || true
+	@fuser -k 3001/tcp 2>/dev/null || true
 	@echo "Done"
 
 # Full restart

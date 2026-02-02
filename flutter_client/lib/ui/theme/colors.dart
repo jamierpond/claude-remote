@@ -40,6 +40,7 @@ class AppColors {
   static const Color warningMuted = Color(0xFF4A3D2D);
   static const Color info = Color(0xFF5A9AAD);
   static const Color infoMuted = Color(0xFF2D3D4A);
+  static const Color link = Color(0xFF60A5FA); // Blue for links
 
   // === Tool Colors (for activity feed) ===
   static Color getToolColor(String toolName) {

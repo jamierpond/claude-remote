@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
 import '../../models/task.dart';
 import '../../providers/task_provider.dart';
 import '../../providers/project_provider.dart';
@@ -101,6 +102,24 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
           curve: Curves.easeOut,
         );
       });
+    }
+  }
+
+  Future<void> _devReload() async {
+    final authState = ref.read(authStateProvider);
+    final serverUrl = authState.serverUrl;
+    if (serverUrl == null) return;
+
+    try {
+      // Map client URL to server URL (ai.pond.audio -> ai-server.pond.audio)
+      var apiUrl = serverUrl;
+      if (serverUrl.contains('ai.pond.audio')) {
+        apiUrl = serverUrl.replaceFirst('ai.pond.audio', 'ai-server.pond.audio');
+      }
+      await http.post(Uri.parse('$apiUrl/api/dev/full-reload'));
+      print('[dev] Triggered full reload');
+    } catch (e) {
+      print('[dev] Failed to trigger reload: $e');
     }
   }
 
@@ -256,6 +275,15 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
             },
             icon: const Icon(Icons.refresh, color: AppColors.textSecondary, size: 20),
             tooltip: 'Reset',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+
+          // Dev reload button
+          IconButton(
+            onPressed: _devReload,
+            icon: const Icon(Icons.build, color: AppColors.warning, size: 20),
+            tooltip: 'Dev Reload',
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
           ),
