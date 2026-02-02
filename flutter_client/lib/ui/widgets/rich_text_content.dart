@@ -89,7 +89,7 @@ class _RichTextContentState extends State<RichTextContent> {
       r'(\*|_)([^*_]+?)\3|'          // Italic: *text* or _text_
       r'`([^`]+)`|'                   // Inline code: `code`
       r'\[([^\]]+)\]\(([^)]+)\)|'    // Markdown link: [text](url)
-      r"(https?://[^\s<>\[\])\"']+)", // Bare URL
+      r'(https?://[^\s<>\[\]()]+)',  // Bare URL
     );
 
     int lastEnd = 0;
