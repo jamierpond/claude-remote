@@ -41,6 +41,24 @@ class ToolActivity extends Equatable {
       timestamp: DateTime.now(),
     );
   }
+
+  factory ToolActivity.fromJson(Map<String, dynamic> json) {
+    final typeStr = json['type'] as String?;
+    final type = typeStr == 'toolResult'
+        ? ToolActivityType.toolResult
+        : ToolActivityType.toolUse;
+
+    return ToolActivity(
+      type: type,
+      tool: json['tool'] as String? ?? 'Unknown',
+      input: json['input'] as Map<String, dynamic>?,
+      output: json['output'] as String?,
+      error: json['error'] as String?,
+      timestamp: json['timestamp'] != null
+          ? DateTime.tryParse(json['timestamp'] as String) ?? DateTime.now()
+          : DateTime.now(),
+    );
+  }
   
   /// Get a short description for the activity feed
   String get shortDescription {

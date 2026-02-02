@@ -180,7 +180,7 @@ class TaskManagerNotifier extends StateNotifier<TaskManagerState> {
             outputChunks: msg.text != null && msg.text!.isNotEmpty
                 ? [OutputChunk(text: msg.text!, timestamp: DateTime.now())]
                 : [],
-            activity: restoredActivities,
+            activities: restoredActivities,
           );
 
           state = state.updateProject(projectId, (s) => s.copyWith(
