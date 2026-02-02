@@ -51,9 +51,11 @@ async function deriveSharedSecret(privateKey: CryptoKey, peerPublicKey: CryptoKe
     privateKey,
     256
   );
+  // Hash with SHA-256 to ensure consistent 32-byte key across platforms
+  const hashed = await crypto.subtle.digest('SHA-256', bits);
   return crypto.subtle.importKey(
     'raw',
-    bits,
+    hashed,
     { name: 'AES-GCM', length: 256 },
     false,
     ['encrypt', 'decrypt']
@@ -144,100 +146,156 @@ export default function Chat({ token }: Props) {
     }
     pairingStarted.current = true;
 
-    try {
-      const getRes = await fetch(`/api/pair/${token}`);
-      if (!getRes.ok) {
-        const err = await getRes.json();
-        setError(err.error || 'Failed to get server key');
-        return;
-      }
-      const { serverPublicKey } = await getRes.json();
-
-      const keyPair = await generateKeyPair();
-      const clientPublicKey = await exportPublicKey(keyPair.publicKey);
-      const privateKeyJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey);
-
-      const postRes = await fetch(`/api/pair/${token}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientPublicKey }),
-      });
-
-      if (!postRes.ok) {
-        const err = await postRes.json();
-        setError(err.error || 'Failed to complete pairing');
-        return;
-      }
-
-      const { deviceId } = await postRes.json();
-
-      const serverKey = await importPublicKey(serverPublicKey);
-      const sharedKey = await deriveSharedSecret(keyPair.privateKey, serverKey);
-
-      localStorage.setItem('claude-remote-paired', 'true');
-      localStorage.setItem('claude-remote-device-id', deviceId);
-      localStorage.setItem('claude-remote-private-key', JSON.stringify(privateKeyJwk));
-      localStorage.setItem('claude-remote-server-public-key', serverPublicKey);
-
-      // Hard redirect to avoid React strict mode issues
-      window.location.href = '/chat';
-    } catch (err) {
-      setError(`Pairing failed: ${err}`);
+    const getRes = await fetch(`/api/pair/${token}`);
+    if (!getRes.ok) {
+      const data = await getRes.json();
+      const msg = `Failed to get server key: ${data.error || getRes.status}`;
+      console.error(msg, data);
+      setError(msg);
+      throw new Error(msg);
     }
+    const { serverPublicKey } = await getRes.json();
+    if (!serverPublicKey) {
+      const msg = 'Server returned empty public key';
+      console.error(msg);
+      setError(msg);
+      throw new Error(msg);
+    }
+
+    const keyPair = await generateKeyPair();
+    const clientPublicKey = await exportPublicKey(keyPair.publicKey);
+    const privateKeyJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey);
+
+    const postRes = await fetch(`/api/pair/${token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientPublicKey }),
+    });
+
+    if (!postRes.ok) {
+      const data = await postRes.json();
+      const msg = `Failed to complete pairing: ${data.error || postRes.status}`;
+      console.error(msg, data);
+      setError(msg);
+      throw new Error(msg);
+    }
+
+    const { deviceId } = await postRes.json();
+    if (!deviceId) {
+      const msg = 'Server returned empty device ID';
+      console.error(msg);
+      setError(msg);
+      throw new Error(msg);
+    }
+
+    const serverKey = await importPublicKey(serverPublicKey);
+    await deriveSharedSecret(keyPair.privateKey, serverKey); // Verify key derivation works
+
+    localStorage.setItem('claude-remote-paired', 'true');
+    localStorage.setItem('claude-remote-device-id', deviceId);
+    localStorage.setItem('claude-remote-private-key', JSON.stringify(privateKeyJwk));
+    localStorage.setItem('claude-remote-server-public-key', serverPublicKey);
+
+    // Hard redirect to avoid React strict mode issues
+    window.location.href = '/chat';
   }, [token]);
 
   useEffect(() => {
     if (token && view === 'pairing') {
-      completePairing();
+      completePairing().catch((err) => {
+        console.error('Pairing failed:', err);
+        // Error already set in completePairing
+      });
     }
   }, [completePairing, token, view]);
 
-  const restoreSharedKey = useCallback(async () => {
+  const restoreSharedKey = useCallback(async (): Promise<void> => {
     const privateKeyJwk = localStorage.getItem('claude-remote-private-key');
     const serverPublicKey = localStorage.getItem('claude-remote-server-public-key');
 
-    if (!privateKeyJwk || !serverPublicKey) {
-      return false;
+    if (!privateKeyJwk) {
+      throw new Error('No private key in localStorage - device not paired');
+    }
+    if (!serverPublicKey) {
+      throw new Error('No server public key in localStorage - device not paired');
     }
 
-    try {
-      const privateKey = await crypto.subtle.importKey(
-        'jwk',
-        JSON.parse(privateKeyJwk),
-        { name: 'ECDH', namedCurve: 'P-256' },
-        true,
-        ['deriveBits']
-      );
-      const serverKey = await importPublicKey(serverPublicKey);
-      const sharedKey = await deriveSharedSecret(privateKey, serverKey);
-      sharedKeyRef.current = sharedKey;
-      return true;
-    } catch {
-      return false;
-    }
+    const privateKey = await crypto.subtle.importKey(
+      'jwk',
+      JSON.parse(privateKeyJwk),
+      { name: 'ECDH', namedCurve: 'P-256' },
+      true,
+      ['deriveBits']
+    );
+    const serverKey = await importPublicKey(serverPublicKey);
+    const sharedKey = await deriveSharedSecret(privateKey, serverKey);
+    sharedKeyRef.current = sharedKey;
   }, []);
 
-  const connectWebSocket = useCallback(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+  const connectWebSocket = useCallback((): Promise<WebSocket> => {
+    return new Promise((resolve, reject) => {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
-    ws.onopen = () => {
-      wsRef.current = ws;
-    };
+      ws.onopen = () => {
+        wsRef.current = ws;
+        resolve(ws);
+      };
 
-    ws.onmessage = async (event) => {
-      if (!sharedKeyRef.current) return;
+      ws.onmessage = async (event) => {
+        if (!sharedKeyRef.current) {
+          const err = 'FATAL: Received WebSocket message but sharedKeyRef is null - this should never happen';
+          console.error(err);
+          alert(err);
+          setError(err);
+          setIsStreaming(false);
+          return;
+        }
 
-      try {
-        const encrypted: EncryptedData = JSON.parse(event.data);
-        const decrypted = await decrypt(encrypted, sharedKeyRef.current);
-        const msg = JSON.parse(decrypted);
+        let encrypted: EncryptedData;
+        try {
+          encrypted = JSON.parse(event.data);
+        } catch (err) {
+          const msg = `FATAL: Failed to parse WebSocket message as JSON: ${err}`;
+          console.error(msg, event.data);
+          alert(msg);
+          setError(msg);
+          setIsStreaming(false);
+          return;
+        }
+
+        let decrypted: string;
+        try {
+          decrypted = await decrypt(encrypted, sharedKeyRef.current);
+        } catch (err) {
+          const msg = `FATAL: Decryption failed - crypto keys likely mismatched. Clear localStorage and re-pair. Error: ${err}`;
+          console.error(msg, err, encrypted);
+          alert(msg);
+          setError(msg);
+          setIsStreaming(false);
+          return;
+        }
+
+        let msg: { type: string; text?: string; error?: string };
+        try {
+          msg = JSON.parse(decrypted);
+        } catch (err) {
+          const errMsg = `FATAL: Failed to parse decrypted message as JSON: ${err}`;
+          console.error(errMsg, decrypted);
+          alert(errMsg);
+          setError(errMsg);
+          setIsStreaming(false);
+          return;
+        }
 
         if (msg.type === 'auth_ok') {
           setError('');
           setView('chat');
         } else if (msg.type === 'auth_error') {
-          setError(msg.error || 'Authentication failed');
+          const errMsg = `AUTH FAILED: ${msg.error || 'Unknown auth error'}`;
+          console.error(errMsg);
+          alert(errMsg);
+          setError(errMsg);
         } else if (msg.type === 'thinking') {
           thinkingRef.current += msg.text || '';
           setCurrentThinking(thinkingRef.current);
@@ -260,21 +318,38 @@ export default function Chat({ token }: Props) {
           setCurrentThinking('');
           setCurrentResponse('');
         } else if (msg.type === 'error') {
-          setError(msg.error || 'An error occurred');
+          const errMsg = `SERVER ERROR: ${msg.error || 'Unknown server error'}`;
+          console.error(errMsg);
+          alert(errMsg);
+          setError(errMsg);
           setIsStreaming(false);
+        } else {
+          const errMsg = `Unknown message type: ${msg.type}`;
+          console.error(errMsg, msg);
+          setError(errMsg);
         }
-      } catch (err) {
-        console.error('Failed to process message:', err);
-      }
-    };
+      };
 
-    ws.onclose = () => {
-      wsRef.current = null;
-    };
+      ws.onclose = (event) => {
+        const msg = `WebSocket CLOSED: code=${event.code} reason="${event.reason || 'none'}"`;
+        console.error(msg);
+        wsRef.current = null;
+        setIsStreaming(false);
+        if (event.code !== 1000) {
+          alert(msg);
+          setError(msg);
+        }
+      };
 
-    ws.onerror = () => {
-      setError('WebSocket connection failed');
-    };
+      ws.onerror = (event) => {
+        const msg = 'FATAL: WebSocket connection failed';
+        console.error(msg, event);
+        alert(msg);
+        setError(msg);
+        setIsStreaming(false);
+        reject(new Error(msg));
+      };
+    });
   }, []);
 
   const handlePinSubmit = async (e: React.FormEvent) => {
@@ -285,33 +360,77 @@ export default function Chat({ token }: Props) {
     }
 
     if (!sharedKeyRef.current) {
-      const restored = await restoreSharedKey();
-      if (!restored) {
-        setError('Failed to restore encryption keys');
+      try {
+        await restoreSharedKey();
+      } catch (err) {
+        const msg = `Failed to restore encryption keys: ${err}`;
+        console.error(msg, err);
+        setError(msg);
         return;
       }
     }
 
-    if (!wsRef.current) {
-      connectWebSocket();
-      await new Promise(resolve => setTimeout(resolve, 500));
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      try {
+        await connectWebSocket();
+      } catch (err) {
+        const msg = `WebSocket connection failed: ${err}`;
+        console.error(msg);
+        setError(msg);
+        return;
+      }
     }
 
-    if (wsRef.current && sharedKeyRef.current) {
-      const encrypted = await encrypt(
-        JSON.stringify({ type: 'auth', pin }),
-        sharedKeyRef.current
-      );
-      wsRef.current.send(JSON.stringify(encrypted));
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      const err = 'WebSocket not connected after connect attempt';
+      console.error(err);
+      setError(err);
+      return;
     }
+
+    if (!sharedKeyRef.current) {
+      const err = 'Shared key is null - cannot encrypt';
+      console.error(err);
+      setError(err);
+      return;
+    }
+
+    const encrypted = await encrypt(
+      JSON.stringify({ type: 'auth', pin }),
+      sharedKeyRef.current
+    );
+    wsRef.current.send(JSON.stringify(encrypted));
   };
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || !wsRef.current || !sharedKeyRef.current || isStreaming) return;
+
+    if (!input.trim()) {
+      return; // Empty input is fine to ignore silently
+    }
+
+    if (isStreaming) {
+      console.warn('Already streaming, ignoring send');
+      return;
+    }
+
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      const err = 'WebSocket not connected - cannot send message';
+      console.error(err, { wsRef: wsRef.current, readyState: wsRef.current?.readyState });
+      setError(err);
+      return;
+    }
+
+    if (!sharedKeyRef.current) {
+      const err = 'Shared key is null - cannot encrypt message';
+      console.error(err);
+      setError(err);
+      return;
+    }
 
     const text = input.trim();
     setInput('');
+    setError(''); // Clear any previous errors
     setMessages(prev => [...prev, { role: 'user', content: text }]);
     setIsStreaming(true);
     thinkingRef.current = '';
@@ -319,11 +438,18 @@ export default function Chat({ token }: Props) {
     setCurrentThinking('');
     setCurrentResponse('');
 
-    const encrypted = await encrypt(
-      JSON.stringify({ type: 'message', text }),
-      sharedKeyRef.current
-    );
-    wsRef.current.send(JSON.stringify(encrypted));
+    try {
+      const encrypted = await encrypt(
+        JSON.stringify({ type: 'message', text }),
+        sharedKeyRef.current
+      );
+      wsRef.current.send(JSON.stringify(encrypted));
+    } catch (err) {
+      const msg = `Failed to encrypt/send message: ${err}`;
+      console.error(msg, err);
+      setError(msg);
+      setIsStreaming(false);
+    }
   };
 
   const handleCancel = async () => {
