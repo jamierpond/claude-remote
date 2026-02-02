@@ -55,7 +55,6 @@ export function spawnClaude(
   };
 
   let buffer = '';
-  let currentType: 'thinking' | 'text' | null = null;
 
   const processLine = (line: string) => {
     if (!line.trim()) return;
@@ -128,8 +127,10 @@ export function spawnClaude(
   });
 
   proc.on('error', (err) => {
-    console.error('[claude] PROCESS ERROR:', err);
-    onEvent({ type: 'error', text: err.message });
+    clearTimeout(timeout);
+    const msg = `[claude] FATAL PROCESS ERROR: ${err.message}`;
+    console.error(msg, err);
+    onEvent({ type: 'error', text: msg });
     onEvent({ type: 'done' });
   });
 

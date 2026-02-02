@@ -116,6 +116,44 @@ export default function Chat({ token }: Props) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const fetchConversationHistory = async () => {
+    console.log('Fetching conversation history...');
+    try {
+      const res = await fetch('/api/conversation');
+      if (!res.ok) {
+        throw new Error(`Failed to fetch history: ${res.status}`);
+      }
+      const data = await res.json();
+      console.log('Loaded conversation history:', data.messages?.length, 'messages');
+      if (data.messages && data.messages.length > 0) {
+        setMessages(data.messages.map((m: { role: string; content: string; thinking?: string }) => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+          thinking: m.thinking,
+        })));
+      }
+    } catch (err) {
+      console.error('Failed to fetch conversation history:', err);
+      // Don't show error to user - just start fresh
+    }
+  };
+
+  const clearHistory = async () => {
+    console.log('Clearing conversation history...');
+    try {
+      const res = await fetch('/api/conversation', { method: 'DELETE' });
+      if (!res.ok) {
+        throw new Error(`Failed to clear history: ${res.status}`);
+      }
+      setMessages([]);
+      console.log('History cleared');
+    } catch (err) {
+      const msg = `Failed to clear history: ${err}`;
+      console.error(msg);
+      alert(msg);
+    }
+  };
+
   useEffect(() => {
     scrollToBottom();
   }, [messages, currentThinking, currentResponse]);
@@ -302,6 +340,8 @@ export default function Chat({ token }: Props) {
         if (msg.type === 'auth_ok') {
           setError('');
           setView('chat');
+          // Fetch conversation history
+          fetchConversationHistory();
         } else if (msg.type === 'auth_error') {
           const errMsg = `AUTH FAILED: ${msg.error || 'Unknown auth error'}`;
           console.error(errMsg);
@@ -662,6 +702,15 @@ export default function Chat({ token }: Props) {
             title="Reset stuck state"
           >
             Reset
+          </button>
+          <button
+            type="button"
+            onClick={clearHistory}
+            disabled={isStreaming}
+            className="px-4 py-3 bg-yellow-700 rounded-lg font-semibold hover:bg-yellow-600 transition-colors disabled:opacity-50"
+            title="Clear conversation history"
+          >
+            Clear
           </button>
         </form>
       </div>

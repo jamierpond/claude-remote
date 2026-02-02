@@ -22,6 +22,18 @@ export interface Config {
   pinHash: string | null;
 }
 
+export interface Message {
+  role: 'user' | 'assistant';
+  content: string;
+  thinking?: string;
+  timestamp: string;
+}
+
+export interface Conversation {
+  messages: Message[];
+  updatedAt: string;
+}
+
 function ensureConfigDir() {
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true });
@@ -88,4 +100,36 @@ export async function verifyPin(pin: string, hash: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export function loadConversation(): Conversation {
+  try {
+    const path = join(CONFIG_DIR, 'conversation.json');
+    if (!existsSync(path)) return { messages: [], updatedAt: new Date().toISOString() };
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch (err) {
+    console.error('[store] Failed to load conversation:', err);
+    return { messages: [], updatedAt: new Date().toISOString() };
+  }
+}
+
+export function saveConversation(conversation: Conversation): void {
+  ensureConfigDir();
+  conversation.updatedAt = new Date().toISOString();
+  writeFileSync(join(CONFIG_DIR, 'conversation.json'), JSON.stringify(conversation, null, 2));
+  console.log('[store] Conversation saved, messages:', conversation.messages.length);
+}
+
+export function addMessage(message: Message): Conversation {
+  const conversation = loadConversation();
+  conversation.messages.push(message);
+  saveConversation(conversation);
+  return conversation;
+}
+
+export function clearConversation(): void {
+  ensureConfigDir();
+  const empty: Conversation = { messages: [], updatedAt: new Date().toISOString() };
+  writeFileSync(join(CONFIG_DIR, 'conversation.json'), JSON.stringify(empty, null, 2));
+  console.log('[store] Conversation cleared');
 }

@@ -22,8 +22,12 @@ import {
   saveServerState,
   verifyPin,
   hashPin,
+  loadConversation,
+  addMessage,
+  clearConversation,
   Device,
   ServerState,
+  Message,
 } from './src/lib/store';
 import { spawnClaude, ClaudeEvent } from './src/lib/claude';
 
@@ -96,6 +100,20 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       pairedAt: device?.createdAt || null,
       pairingUrl: serverState.pairingToken ? `http://localhost:${clientPort}/pair/${serverState.pairingToken}` : null,
     });
+  }
+
+  // API: Get conversation history
+  if (pathname === '/api/conversation' && method === 'GET') {
+    const conversation = loadConversation();
+    console.log('[api] Returning conversation with', conversation.messages.length, 'messages');
+    return json(res, conversation);
+  }
+
+  // API: Clear conversation
+  if (pathname === '/api/conversation' && method === 'DELETE') {
+    clearConversation();
+    console.log('[api] Conversation cleared');
+    return json(res, { success: true });
   }
 
   // API: Pair GET - get server public key
@@ -305,11 +323,41 @@ async function main() {
           return;
         }
 
-        console.log('Processing message:', msg.text?.substring(0, 50));
+        const userText = msg.text || '';
+        console.log('Processing message:', userText.substring(0, 50));
+
+        // Save user message
+        addMessage({
+          role: 'user',
+          content: userText,
+          timestamp: new Date().toISOString(),
+        });
+
         abortController = new AbortController();
 
-        spawnClaude(msg.text || '', (event: ClaudeEvent) => {
+        // Track assistant response
+        let assistantThinking = '';
+        let assistantText = '';
+
+        spawnClaude(userText, (event: ClaudeEvent) => {
           sendEncrypted(event);
+
+          // Collect response for saving
+          if (event.type === 'thinking' && event.text) {
+            assistantThinking += event.text;
+          } else if (event.type === 'text' && event.text) {
+            assistantText += event.text;
+          } else if (event.type === 'done') {
+            // Save assistant message when complete
+            if (assistantText || assistantThinking) {
+              addMessage({
+                role: 'assistant',
+                content: assistantText,
+                thinking: assistantThinking || undefined,
+                timestamp: new Date().toISOString(),
+              });
+            }
+          }
         }, abortController.signal);
       } else if (msg.type === 'cancel') {
         console.log('Cancel requested');
