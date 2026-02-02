@@ -7,6 +7,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+env:
+  FLUTTER_VERSION: '3.38.x'
+
 jobs:
   build-web:
     runs-on: ubuntu-latest
@@ -21,9 +24,18 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.38.x'
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: 'stable'
           cache: true
+
+      - name: Cache pub dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            flutter_client/.dart_tool
+          key: pub-${{ runner.os }}-${{ hashFiles('flutter_client/pubspec.lock') }}
+          restore-keys: pub-${{ runner.os }}-
 
       - name: Install dependencies
         run: flutter pub get
@@ -48,9 +60,25 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.38.x'
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: 'stable'
           cache: true
+
+      - name: Cache pub dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            flutter_client/.dart_tool
+          key: pub-${{ runner.os }}-${{ hashFiles('flutter_client/pubspec.lock') }}
+          restore-keys: pub-${{ runner.os }}-
+
+      - name: Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: flutter_client/ios/Pods
+          key: pods-${{ runner.os }}-${{ hashFiles('flutter_client/ios/Podfile.lock') }}
+          restore-keys: pods-${{ runner.os }}-
 
       - name: Install dependencies
         run: flutter pub get
@@ -74,15 +102,36 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.38.x'
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: 'stable'
           cache: true
+
+      - name: Cache pub dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            flutter_client/.dart_tool
+          key: pub-${{ runner.os }}-${{ hashFiles('flutter_client/pubspec.lock') }}
+          restore-keys: pub-${{ runner.os }}-
 
       - name: Install dependencies
         run: flutter pub get
 
       - name: Build APK
         run: flutter build apk --release
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.daemon=true -Dorg.gradle.parallel=true -Dorg.gradle.caching=true"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: flutter_client/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 14
