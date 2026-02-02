@@ -146,18 +146,23 @@ export default function Chat({ token }: Props) {
     }
     pairingStarted.current = true;
 
+    console.log('Fetching server public key...');
     const getRes = await fetch(`/api/pair/${token}`);
     if (!getRes.ok) {
-      const data = await getRes.json();
-      const msg = `Failed to get server key: ${data.error || getRes.status}`;
+      const data = await getRes.json().catch(() => ({}));
+      const msg = `FATAL: Failed to get server key: ${data.error || getRes.status}`;
       console.error(msg, data);
+      alert(msg);
       setError(msg);
       throw new Error(msg);
     }
-    const { serverPublicKey } = await getRes.json();
+    const getData = await getRes.json();
+    console.log('Got server response:', getData);
+    const { serverPublicKey } = getData;
     if (!serverPublicKey) {
-      const msg = 'Server returned empty public key';
-      console.error(msg);
+      const msg = 'FATAL: Server returned empty public key';
+      console.error(msg, getData);
+      alert(msg);
       setError(msg);
       throw new Error(msg);
     }
