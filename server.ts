@@ -15,8 +15,6 @@ import {
   saveDevice,
   loadServerState,
   saveServerState,
-  loadConfig,
-  saveConfig,
   verifyPin,
   hashPin,
   Device,
@@ -26,7 +24,16 @@ import { spawnClaude, ClaudeEvent } from './src/lib/claude';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = 'localhost';
-const port = parseInt(process.env.PORT || '3001', 10);
+const port = parseInt(process.env.PORT || '6767', 10);
+
+// PIN must be set via environment variable
+const PIN = process.env.CLAUDE_REMOTE_PIN;
+if (!PIN) {
+  console.error('CLAUDE_REMOTE_PIN environment variable is required');
+  process.exit(1);
+}
+
+let pinHash: string;
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
@@ -81,7 +88,8 @@ export function completePairing(clientPublicKey: string) {
   return { serverPublicKey: serverState.publicKey, deviceId: newDevice.id };
 }
 
-app.prepare().then(() => {
+app.prepare().then(async () => {
+  pinHash = await hashPin(PIN);
   initializeServer();
 
   const server = createServer(async (req, res) => {
@@ -119,23 +127,12 @@ app.prepare().then(() => {
         const msg = JSON.parse(decrypted);
 
         if (msg.type === 'auth') {
-          const config = loadConfig();
-
-          if (!config.pinHash) {
-            // First auth, set the PIN
-            const hash = await hashPin(msg.pin);
-            saveConfig({ pinHash: hash });
+          const valid = await verifyPin(msg.pin, pinHash);
+          if (valid) {
             authenticated = true;
             sendEncrypted({ type: 'auth_ok' });
           } else {
-            // Verify PIN
-            const valid = await verifyPin(msg.pin, config.pinHash);
-            if (valid) {
-              authenticated = true;
-              sendEncrypted({ type: 'auth_ok' });
-            } else {
-              sendEncrypted({ type: 'auth_error', error: 'Invalid PIN' });
-            }
+            sendEncrypted({ type: 'auth_error', error: 'Invalid PIN' });
           }
         } else if (msg.type === 'message') {
           if (!authenticated) {

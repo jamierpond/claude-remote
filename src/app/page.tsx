@@ -1,6 +1,7 @@
 import { headers } from 'next/headers';
 import QRCode from 'qrcode';
 import { loadDevice, loadServerState } from '@/lib/store';
+import PairedView from './components/PairedView';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,27 +20,11 @@ export default async function Home() {
   const device = loadDevice();
   const serverState = loadServerState();
   const headersList = await headers();
-  const host = headersList.get('host') || 'localhost:3001';
+  const host = headersList.get('host') || 'localhost:6767';
   const protocol = headersList.get('x-forwarded-proto') || 'http';
 
   if (device) {
-    return (
-      <main className="min-h-screen flex flex-col items-center justify-center bg-gray-900 text-white p-4">
-        <div className="text-center">
-          <div className="text-6xl mb-4">&#x2713;</div>
-          <h1 className="text-2xl font-bold mb-2">Device Paired</h1>
-          <p className="text-gray-400 mb-4">
-            Your device is connected and ready.
-          </p>
-          <p className="text-sm text-gray-500">
-            Device ID: {device.id}
-          </p>
-          <p className="text-sm text-gray-500">
-            Paired: {new Date(device.createdAt).toLocaleDateString()}
-          </p>
-        </div>
-      </main>
-    );
+    return <PairedView deviceId={device.id} pairedAt={device.createdAt} />;
   }
 
   if (!serverState?.pairingToken) {
