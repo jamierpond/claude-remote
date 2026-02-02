@@ -480,12 +480,12 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
         width: 48,
         height: 48,
         decoration: const BoxDecoration(
-          color: Colors.red,
+          color: AppColors.error,
           shape: BoxShape.circle,
         ),
         child: IconButton(
           onPressed: _cancel,
-          icon: const Icon(Icons.stop, color: Colors.white),
+          icon: const Icon(Icons.stop, color: AppColors.textOnPrimary),
         ),
       );
     }
@@ -494,12 +494,12 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
       width: 48,
       height: 48,
       decoration: const BoxDecoration(
-        color: Colors.blue,
+        color: AppColors.primary,
         shape: BoxShape.circle,
       ),
       child: IconButton(
         onPressed: _sendTask,
-        icon: const Icon(Icons.send, color: Colors.white),
+        icon: const Icon(Icons.send, color: AppColors.textOnPrimary),
       ),
     );
   }

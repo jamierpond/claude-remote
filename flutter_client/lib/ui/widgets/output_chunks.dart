@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../models/task.dart';
+import '../theme/colors.dart';
+import '../theme/spacing.dart';
 
 class OutputChunks extends StatelessWidget {
   final List<OutputChunk> chunks;
-  
+
   const OutputChunks({super.key, required this.chunks});
-  
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -14,19 +16,19 @@ class OutputChunks extends StatelessWidget {
       children: [
         // Header
         Padding(
-          padding: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.only(bottom: AppSpacing.md),
           child: Row(
             children: [
-              Icon(
+              const Icon(
                 Icons.chat_bubble_outline,
                 size: 16,
-                color: Colors.grey[500],
+                color: AppColors.textMuted,
               ),
-              const SizedBox(width: 8),
-              Text(
+              AppSpacing.gapHorizontalSm,
+              const Text(
                 'Response',
                 style: TextStyle(
-                  color: Colors.grey[400],
+                  color: AppColors.textSecondary,
                   fontSize: 13,
                   fontWeight: FontWeight.w500,
                 ),
@@ -34,21 +36,21 @@ class OutputChunks extends StatelessWidget {
               const Spacer(),
               Text(
                 '${chunks.length} chunks',
-                style: TextStyle(
-                  color: Colors.grey[600],
+                style: const TextStyle(
+                  color: AppColors.textMuted,
                   fontSize: 11,
                 ),
               ),
             ],
           ),
         ),
-        
+
         // Chunks
         ...chunks.asMap().entries.map((entry) {
           final index = entry.key;
           final chunk = entry.value;
           final isFirst = index == 0;
-          
+
           return _ChunkCard(
             chunk: chunk,
             showDivider: !isFirst,
@@ -62,52 +64,52 @@ class OutputChunks extends StatelessWidget {
 class _ChunkCard extends StatelessWidget {
   final OutputChunk chunk;
   final bool showDivider;
-  
+
   const _ChunkCard({
     required this.chunk,
     this.showDivider = false,
   });
-  
+
   @override
   Widget build(BuildContext context) {
     final timeFormat = DateFormat('HH:mm:ss');
-    
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (showDivider)
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
             child: Row(
               children: [
-                Expanded(
-                  child: Divider(color: Colors.grey[800]),
+                const Expanded(
+                  child: Divider(color: AppColors.divider),
                 ),
                 if (chunk.afterTool != null) ...[
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
                     child: Text(
                       'after ${chunk.afterTool}',
-                      style: TextStyle(
-                        color: Colors.grey[600],
+                      style: const TextStyle(
+                        color: AppColors.textMuted,
                         fontSize: 10,
                       ),
                     ),
                   ),
-                  Expanded(
-                    child: Divider(color: Colors.grey[800]),
+                  const Expanded(
+                    child: Divider(color: AppColors.divider),
                   ),
                 ],
               ],
             ),
           ),
-        
+
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(AppSpacing.lg),
           decoration: BoxDecoration(
-            color: Colors.grey[850],
-            borderRadius: BorderRadius.circular(12),
+            color: AppColors.surfaceVariant,
+            borderRadius: BorderRadius.circular(AppRadius.md),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -118,22 +120,23 @@ class _ChunkCard extends StatelessWidget {
                 children: [
                   Text(
                     timeFormat.format(chunk.timestamp),
-                    style: TextStyle(
-                      color: Colors.grey[700],
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
                       fontSize: 10,
-                      fontFamily: 'monospace',
+                      fontFamily: 'SF Mono',
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 4),
-              
+              AppSpacing.gapVerticalXs,
+
               // Content
               SelectableText(
                 chunk.text,
                 style: const TextStyle(
                   fontSize: 14,
                   height: 1.6,
+                  color: AppColors.textPrimary,
                 ),
               ),
             ],

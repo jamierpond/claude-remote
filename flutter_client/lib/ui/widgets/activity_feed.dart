@@ -1,23 +1,25 @@
 import 'package:flutter/material.dart';
 import '../../models/tool_activity.dart';
+import '../theme/colors.dart';
+import '../theme/spacing.dart';
 
 class ActivityFeed extends StatefulWidget {
   final List<ToolActivity> activities;
   final bool isLive;
-  
+
   const ActivityFeed({
     super.key,
     required this.activities,
     this.isLive = false,
   });
-  
+
   @override
   State<ActivityFeed> createState() => _ActivityFeedState();
 }
 
 class _ActivityFeedState extends State<ActivityFeed> {
   bool _expanded = true;
-  
+
   IconData _getToolIcon(String tool) {
     switch (tool) {
       case 'Read':
@@ -40,72 +42,54 @@ class _ActivityFeedState extends State<ActivityFeed> {
         return Icons.extension;
     }
   }
-  
-  Color _getToolColor(String tool) {
-    switch (tool) {
-      case 'Read':
-        return Colors.cyan;
-      case 'Write':
-        return Colors.green;
-      case 'Edit':
-        return Colors.orange;
-      case 'Bash':
-        return Colors.yellow;
-      case 'Glob':
-      case 'Grep':
-        return Colors.purple;
-      default:
-        return Colors.grey;
-    }
-  }
-  
+
   @override
   Widget build(BuildContext context) {
     final toolUseCount = widget.activities.where((a) => a.isToolUse).length;
-    
+
     return Container(
       decoration: BoxDecoration(
-        color: Colors.grey[850],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[800]!),
+        color: AppColors.surfaceVariant,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: AppColors.border),
       ),
       child: Column(
         children: [
           // Header
           InkWell(
             onTap: () => setState(() => _expanded = !_expanded),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.md)),
             child: Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(AppSpacing.md),
               child: Row(
                 children: [
                   Icon(
                     _expanded ? Icons.expand_less : Icons.expand_more,
                     size: 20,
-                    color: Colors.grey[500],
+                    color: AppColors.textMuted,
                   ),
-                  const SizedBox(width: 8),
+                  AppSpacing.gapHorizontalSm,
                   const Icon(
                     Icons.build_circle,
                     size: 16,
-                    color: Colors.blue,
+                    color: AppColors.primary,
                   ),
-                  const SizedBox(width: 8),
-                  Text(
+                  AppSpacing.gapHorizontalSm,
+                  const Text(
                     'Activity',
                     style: TextStyle(
-                      color: Colors.grey[400],
+                      color: AppColors.textSecondary,
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
                   if (widget.isLive) ...[
-                    const SizedBox(width: 8),
+                    AppSpacing.gapHorizontalSm,
                     Container(
                       width: 6,
                       height: 6,
                       decoration: const BoxDecoration(
-                        color: Colors.blue,
+                        color: AppColors.primary,
                         shape: BoxShape.circle,
                       ),
                     ),
@@ -113,8 +97,8 @@ class _ActivityFeedState extends State<ActivityFeed> {
                   const Spacer(),
                   Text(
                     '$toolUseCount tools',
-                    style: TextStyle(
-                      color: Colors.grey[600],
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
                       fontSize: 11,
                     ),
                   ),
@@ -122,7 +106,7 @@ class _ActivityFeedState extends State<ActivityFeed> {
               ),
             ),
           ),
-          
+
           // Activity list
           if (_expanded)
             ListView.builder(
@@ -138,26 +122,26 @@ class _ActivityFeedState extends State<ActivityFeed> {
       ),
     );
   }
-  
+
   Widget _buildActivityItem(ToolActivity activity) {
     if (activity.isToolResult) {
       return Padding(
-        padding: const EdgeInsets.fromLTRB(48, 0, 12, 8),
+        padding: const EdgeInsets.fromLTRB(48, 0, AppSpacing.md, AppSpacing.sm),
         child: Row(
           children: [
             Icon(
               activity.hasError ? Icons.error_outline : Icons.check,
               size: 14,
-              color: activity.hasError ? Colors.red : Colors.green,
+              color: activity.hasError ? AppColors.error : AppColors.success,
             ),
-            const SizedBox(width: 6),
+            AppSpacing.gapHorizontalXs,
             Expanded(
               child: Text(
                 activity.hasError
                     ? 'Error: ${activity.error}'
                     : 'Done${activity.output != null ? ' (${activity.output!.length} chars)' : ''}',
                 style: TextStyle(
-                  color: activity.hasError ? Colors.red[300] : Colors.green[300],
+                  color: activity.hasError ? AppColors.error : AppColors.success,
                   fontSize: 11,
                 ),
                 maxLines: 1,
@@ -168,18 +152,18 @@ class _ActivityFeedState extends State<ActivityFeed> {
         ),
       );
     }
-    
-    final color = _getToolColor(activity.tool);
-    
+
+    final color = AppColors.getToolColor(activity.tool);
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+      padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, AppSpacing.xs),
       child: Row(
         children: [
           Container(
             width: 28,
             height: 28,
             decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
+              color: color.withOpacity(0.15),
               borderRadius: BorderRadius.circular(6),
             ),
             child: Icon(
@@ -188,20 +172,21 @@ class _ActivityFeedState extends State<ActivityFeed> {
               color: color,
             ),
           ),
-          const SizedBox(width: 10),
+          AppSpacing.gapHorizontalMd,
           Text(
             activity.tool,
             style: const TextStyle(
               fontWeight: FontWeight.w500,
               fontSize: 13,
+              color: AppColors.textPrimary,
             ),
           ),
-          const SizedBox(width: 8),
+          AppSpacing.gapHorizontalSm,
           Expanded(
             child: Text(
               activity.shortDescription,
-              style: TextStyle(
-                color: Colors.grey[500],
+              style: const TextStyle(
+                color: AppColors.textMuted,
                 fontSize: 12,
               ),
               maxLines: 1,

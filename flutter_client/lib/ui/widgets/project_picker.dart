@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/project.dart';
 import '../../providers/project_provider.dart';
+import '../theme/colors.dart';
+import '../theme/spacing.dart';
 
 class ProjectPicker extends ConsumerStatefulWidget {
   final VoidCallback? onClose;
@@ -55,7 +57,7 @@ class _ProjectPickerState extends ConsumerState<ProjectPicker> {
         maxHeight: MediaQuery.of(context).size.height * 0.8,
       ),
       decoration: const BoxDecoration(
-        color: Color(0xFF1F2937),
+        color: AppColors.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: Column(
@@ -63,18 +65,18 @@ class _ProjectPickerState extends ConsumerState<ProjectPicker> {
         children: [
           // Handle
           Container(
-            margin: const EdgeInsets.only(top: 12),
+            margin: const EdgeInsets.only(top: AppSpacing.md),
             width: 36,
             height: 4,
             decoration: BoxDecoration(
-              color: Colors.grey[600],
+              color: AppColors.textMuted,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
 
           // Header
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(AppSpacing.lg),
             child: Row(
               children: [
                 const Text(
@@ -82,12 +84,13 @@ class _ProjectPickerState extends ConsumerState<ProjectPicker> {
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary,
                   ),
                 ),
                 const Spacer(),
                 IconButton(
                   onPressed: widget.onClose,
-                  icon: const Icon(Icons.close),
+                  icon: const Icon(Icons.close, color: AppColors.textSecondary),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
                 ),
@@ -97,48 +100,50 @@ class _ProjectPickerState extends ConsumerState<ProjectPicker> {
 
           // Search
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
             child: TextField(
               controller: _searchController,
               onChanged: (v) => setState(() => _searchQuery = v),
+              style: const TextStyle(color: AppColors.textPrimary),
               decoration: InputDecoration(
                 hintText: 'Search projects...',
-                prefixIcon: const Icon(Icons.search, size: 20),
+                hintStyle: const TextStyle(color: AppColors.textMuted),
+                prefixIcon: const Icon(Icons.search, size: 20, color: AppColors.textMuted),
                 filled: true,
-                fillColor: const Color(0xFF111827),
+                fillColor: AppColors.background,
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(AppRadius.md),
                   borderSide: BorderSide.none,
                 ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
               ),
             ),
           ),
 
-          const SizedBox(height: 8),
+          AppSpacing.gapVerticalSm,
 
           // Project list
           Flexible(
             child: state.isLoading
                 ? const Center(
                     child: Padding(
-                      padding: EdgeInsets.all(32),
+                      padding: EdgeInsets.all(AppSpacing.xxl),
                       child: CircularProgressIndicator(),
                     ),
                   )
                 : state.error != null
                     ? Center(
                         child: Padding(
-                          padding: const EdgeInsets.all(32),
+                          padding: const EdgeInsets.all(AppSpacing.xxl),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Text(
                                 state.error!,
-                                style: const TextStyle(color: Colors.red),
+                                style: const TextStyle(color: AppColors.error),
                                 textAlign: TextAlign.center,
                               ),
-                              const SizedBox(height: 16),
+                              AppSpacing.gapVerticalLg,
                               TextButton(
                                 onPressed: () => ref.read(projectProvider.notifier).fetchProjects(),
                                 child: const Text('Retry'),
@@ -150,18 +155,18 @@ class _ProjectPickerState extends ConsumerState<ProjectPicker> {
                     : filtered.isEmpty
                         ? Center(
                             child: Padding(
-                              padding: const EdgeInsets.all(32),
+                              padding: const EdgeInsets.all(AppSpacing.xxl),
                               child: Text(
                                 _searchQuery.isNotEmpty
                                     ? 'No matching projects'
                                     : 'No projects found',
-                                style: TextStyle(color: Colors.grey[500]),
+                                style: const TextStyle(color: AppColors.textMuted),
                               ),
                             ),
                           )
                         : ListView.builder(
                             shrinkWrap: true,
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.sm),
                             itemCount: filtered.length,
                             itemBuilder: (context, index) {
                               final project = filtered[index];
@@ -181,16 +186,16 @@ class _ProjectPickerState extends ConsumerState<ProjectPicker> {
           // Footer
           Padding(
             padding: EdgeInsets.only(
-              left: 16,
-              right: 16,
-              top: 8,
-              bottom: MediaQuery.of(context).padding.bottom + 16,
+              left: AppSpacing.lg,
+              right: AppSpacing.lg,
+              top: AppSpacing.sm,
+              bottom: MediaQuery.of(context).padding.bottom + AppSpacing.lg,
             ),
-            child: Text(
+            child: const Text(
               'Projects from ~/projects',
               style: TextStyle(
                 fontSize: 12,
-                color: Colors.grey[600],
+                color: AppColors.textMuted,
               ),
             ),
           ),
@@ -217,29 +222,29 @@ class _ProjectTile extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadius.md),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.md),
           decoration: BoxDecoration(
-            color: isOpen ? Colors.blue.withOpacity(0.1) : null,
-            borderRadius: BorderRadius.circular(12),
+            color: isOpen ? AppColors.primary.withOpacity(0.1) : null,
+            borderRadius: BorderRadius.circular(AppRadius.md),
           ),
           child: Row(
             children: [
               // Folder icon
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(AppSpacing.sm),
                 decoration: BoxDecoration(
-                  color: isOpen ? Colors.blue.withOpacity(0.2) : Colors.grey[800],
-                  borderRadius: BorderRadius.circular(8),
+                  color: isOpen ? AppColors.primary.withOpacity(0.2) : AppColors.surfaceVariant,
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
                 ),
                 child: Icon(
                   Icons.folder,
                   size: 20,
-                  color: isOpen ? Colors.blue[300] : Colors.grey[400],
+                  color: isOpen ? AppColors.primary : AppColors.textSecondary,
                 ),
               ),
-              const SizedBox(width: 12),
+              AppSpacing.gapHorizontalMd,
 
               // Project info
               Expanded(
@@ -253,33 +258,33 @@ class _ProjectTile extends StatelessWidget {
                             project.name,
                             style: TextStyle(
                               fontWeight: FontWeight.w500,
-                              color: isOpen ? Colors.blue[300] : Colors.white,
+                              color: isOpen ? AppColors.primary : AppColors.textPrimary,
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         if (isOpen) ...[
-                          const SizedBox(width: 8),
+                          AppSpacing.gapHorizontalSm,
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: Colors.blue,
+                              color: AppColors.primary,
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: const Text(
                               'Open',
-                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.w500),
+                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.w500, color: AppColors.textOnPrimary),
                             ),
                           ),
                         ],
                       ],
                     ),
-                    const SizedBox(height: 2),
+                    AppSpacing.gapVerticalXs,
                     Text(
                       project.path,
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 12,
-                        color: Colors.grey[600],
+                        color: AppColors.textMuted,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -288,9 +293,9 @@ class _ProjectTile extends StatelessWidget {
               ),
 
               // Arrow
-              Icon(
+              const Icon(
                 Icons.chevron_right,
-                color: Colors.grey[600],
+                color: AppColors.textMuted,
               ),
             ],
           ),

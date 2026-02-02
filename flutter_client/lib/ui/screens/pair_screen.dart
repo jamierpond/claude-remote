@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../providers/auth_provider.dart';
+import '../theme/colors.dart';
+import '../theme/spacing.dart';
 
 class PairScreen extends ConsumerStatefulWidget {
   final String? token;
@@ -109,7 +111,7 @@ class _PairScreenState extends ConsumerState<PairScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _error != null ? Colors.red.shade900 : Colors.black,
+      backgroundColor: _error != null ? AppColors.errorMuted : AppColors.background,
       body: SafeArea(
         child: Column(
           children: [
@@ -117,14 +119,14 @@ class _PairScreenState extends ConsumerState<PairScreen> {
             if (_error != null)
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                color: Colors.red,
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                color: AppColors.error,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('ERROR', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                    const SizedBox(height: 8),
-                    SelectableText(_error!, style: const TextStyle(fontFamily: 'monospace')),
+                    const Text('ERROR', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: AppColors.textOnPrimary)),
+                    AppSpacing.gapVerticalSm,
+                    SelectableText(_error!, style: const TextStyle(fontFamily: 'SF Mono', color: AppColors.textOnPrimary)),
                   ],
                 ),
               ),
@@ -134,7 +136,7 @@ class _PairScreenState extends ConsumerState<PairScreen> {
               child: _showScanner
                   ? MobileScanner(onDetect: _onDetect)
                   : SingleChildScrollView(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(AppSpacing.lg),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
@@ -145,26 +147,27 @@ class _PairScreenState extends ConsumerState<PairScreen> {
                             label: const Text('SCAN QR CODE'),
                             style: ElevatedButton.styleFrom(
                               padding: const EdgeInsets.all(20),
-                              backgroundColor: Colors.blue,
+                              backgroundColor: AppColors.primary,
+                              foregroundColor: AppColors.textOnPrimary,
                             ),
                           ),
 
-                          const SizedBox(height: 24),
+                          AppSpacing.gapVerticalXl,
 
                           // Scanned URL
                           _infoBox('Scanned URL', _scannedUrl ?? '(none)'),
 
-                          const SizedBox(height: 12),
+                          AppSpacing.gapVerticalMd,
 
                           // Derived server URL
                           _infoBox('Server URL', _serverUrl ?? '(none)'),
 
-                          const SizedBox(height: 12),
+                          AppSpacing.gapVerticalMd,
 
                           // Token
                           _infoBox('Token', _token ?? '(none)'),
 
-                          const SizedBox(height: 24),
+                          AppSpacing.gapVerticalXl,
 
                           // PAIR button
                           ElevatedButton(
@@ -173,13 +176,15 @@ class _PairScreenState extends ConsumerState<PairScreen> {
                                 : null,
                             style: ElevatedButton.styleFrom(
                               padding: const EdgeInsets.all(20),
-                              backgroundColor: Colors.green,
+                              backgroundColor: AppColors.success,
+                              foregroundColor: AppColors.textOnPrimary,
+                              disabledBackgroundColor: AppColors.surfaceVariant,
                             ),
                             child: _isPairing
                                 ? const Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                                      SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textOnPrimary)),
                                       SizedBox(width: 12),
                                       Text('PAIRING...'),
                                     ],
@@ -187,23 +192,23 @@ class _PairScreenState extends ConsumerState<PairScreen> {
                                 : const Text('PAIR WITH SERVER', style: TextStyle(fontSize: 18)),
                           ),
 
-                          const SizedBox(height: 24),
+                          AppSpacing.gapVerticalXl,
 
                           // Log
                           Container(
-                            padding: const EdgeInsets.all(12),
+                            padding: const EdgeInsets.all(AppSpacing.md),
                             decoration: BoxDecoration(
-                              color: Colors.grey.shade900,
-                              borderRadius: BorderRadius.circular(8),
+                              color: AppColors.surfaceVariant,
+                              borderRadius: BorderRadius.circular(AppRadius.sm),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text('Log:', style: TextStyle(color: Colors.grey)),
-                                const SizedBox(height: 8),
+                                const Text('Log:', style: TextStyle(color: AppColors.textMuted)),
+                                AppSpacing.gapVerticalSm,
                                 SelectableText(
                                   _log.isEmpty ? '(empty)' : _log,
-                                  style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: Colors.green),
+                                  style: const TextStyle(fontFamily: 'SF Mono', fontSize: 11, color: AppColors.success),
                                 ),
                               ],
                             ),
@@ -216,10 +221,13 @@ class _PairScreenState extends ConsumerState<PairScreen> {
             // Cancel button when scanning
             if (_showScanner)
               Padding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(AppSpacing.lg),
                 child: ElevatedButton(
                   onPressed: () => setState(() => _showScanner = false),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.error,
+                    foregroundColor: AppColors.textOnPrimary,
+                  ),
                   child: const Text('CANCEL'),
                 ),
               ),
@@ -231,17 +239,17 @@ class _PairScreenState extends ConsumerState<PairScreen> {
 
   Widget _infoBox(String label, String value) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
-        color: Colors.grey.shade800,
-        borderRadius: BorderRadius.circular(8),
+        color: AppColors.surfaceVariant,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
-          const SizedBox(height: 4),
-          SelectableText(value, style: const TextStyle(fontFamily: 'monospace', fontSize: 14)),
+          Text(label, style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+          AppSpacing.gapVerticalXs,
+          SelectableText(value, style: const TextStyle(fontFamily: 'SF Mono', fontSize: 14, color: AppColors.textPrimary)),
         ],
       ),
     );

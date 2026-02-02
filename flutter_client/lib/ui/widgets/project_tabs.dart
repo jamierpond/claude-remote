@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../models/project.dart';
+import '../theme/colors.dart';
+import '../theme/spacing.dart';
 
 class ProjectTabs extends StatelessWidget {
   final List<Project> projects;
@@ -24,9 +26,9 @@ class ProjectTabs extends StatelessWidget {
     return Container(
       height: 44,
       decoration: BoxDecoration(
-        color: const Color(0xFF1F2937).withOpacity(0.5),
+        color: AppColors.surface.withOpacity(0.5),
         border: const Border(
-          bottom: BorderSide(color: Color(0xFF374151)),
+          bottom: BorderSide(color: AppColors.border),
         ),
       ),
       child: Row(
@@ -37,14 +39,14 @@ class ProjectTabs extends StatelessWidget {
             child: InkWell(
               onTap: onAddProject,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
                 decoration: const BoxDecoration(
                   border: Border(
-                    right: BorderSide(color: Color(0xFF374151)),
+                    right: BorderSide(color: AppColors.border),
                   ),
                 ),
                 child: const Center(
-                  child: Icon(Icons.add, size: 20),
+                  child: Icon(Icons.add, size: 20, color: AppColors.textSecondary),
                 ),
               ),
             ),
@@ -99,13 +101,13 @@ class _ProjectTab extends StatelessWidget {
         onTap: onTap,
         child: Container(
           constraints: const BoxConstraints(maxWidth: 160),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
           decoration: BoxDecoration(
-            color: isActive ? const Color(0xFF111827) : null,
+            color: isActive ? AppColors.background : null,
             border: Border(
-              right: const BorderSide(color: Color(0xFF374151)),
+              right: const BorderSide(color: AppColors.border),
               bottom: isActive
-                  ? const BorderSide(color: Colors.blue, width: 2)
+                  ? const BorderSide(color: AppColors.primary, width: 2)
                   : BorderSide.none,
             ),
           ),
@@ -117,9 +119,9 @@ class _ProjectTab extends StatelessWidget {
                 Container(
                   width: 8,
                   height: 8,
-                  margin: const EdgeInsets.only(right: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.blue[400],
+                  margin: const EdgeInsets.only(right: AppSpacing.sm),
+                  decoration: const BoxDecoration(
+                    color: AppColors.primary,
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -131,13 +133,13 @@ class _ProjectTab extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w500,
-                    color: isActive ? Colors.white : Colors.grey[400],
+                    color: isActive ? AppColors.textPrimary : AppColors.textSecondary,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
 
-              const SizedBox(width: 8),
+              AppSpacing.gapHorizontalSm,
 
               // Close button
               GestureDetector(
@@ -150,7 +152,7 @@ class _ProjectTab extends StatelessWidget {
                   child: Icon(
                     Icons.close,
                     size: 14,
-                    color: isActive ? Colors.grey[400] : Colors.grey[600],
+                    color: isActive ? AppColors.textSecondary : AppColors.textMuted,
                   ),
                 ),
               ),

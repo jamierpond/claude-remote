@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../models/project.dart';
+import '../theme/colors.dart';
+import '../theme/spacing.dart';
 
 class GitStatusBadge extends StatefulWidget {
   final GitStatus? status;
@@ -28,10 +30,10 @@ class _GitStatusBadgeState extends State<GitStatusBadge> {
 
     if (widget.isLoading && widget.status == null) {
       return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
         decoration: BoxDecoration(
-          color: Colors.grey[800],
-          borderRadius: BorderRadius.circular(8),
+          color: AppColors.surfaceVariant,
+          borderRadius: BorderRadius.circular(AppRadius.sm),
         ),
         child: const SizedBox(
           width: 12,
@@ -50,12 +52,12 @@ class _GitStatusBadgeState extends State<GitStatusBadge> {
         children: [
           // Main badge
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
             decoration: BoxDecoration(
               color: status.isDirty
-                  ? Colors.yellow.withOpacity(0.15)
-                  : Colors.grey[800],
-              borderRadius: BorderRadius.circular(8),
+                  ? AppColors.gitDirty.withOpacity(0.15)
+                  : AppColors.surfaceVariant,
+              borderRadius: BorderRadius.circular(AppRadius.sm),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -64,9 +66,9 @@ class _GitStatusBadgeState extends State<GitStatusBadge> {
                 Icon(
                   Icons.call_split,
                   size: 14,
-                  color: status.isDirty ? Colors.yellow[300] : Colors.grey[400],
+                  color: status.isDirty ? AppColors.gitDirty : AppColors.textSecondary,
                 ),
-                const SizedBox(width: 4),
+                AppSpacing.gapHorizontalXs,
 
                 // Branch name
                 ConstrainedBox(
@@ -76,7 +78,7 @@ class _GitStatusBadgeState extends State<GitStatusBadge> {
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
-                      color: status.isDirty ? Colors.yellow[300] : Colors.grey[300],
+                      color: status.isDirty ? AppColors.gitDirty : AppColors.textSecondary,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -84,12 +86,12 @@ class _GitStatusBadgeState extends State<GitStatusBadge> {
 
                 // Dirty indicator
                 if (status.isDirty) ...[
-                  const SizedBox(width: 6),
+                  AppSpacing.gapHorizontalXs,
                   Container(
                     width: 6,
                     height: 6,
-                    decoration: BoxDecoration(
-                      color: Colors.yellow[400],
+                    decoration: const BoxDecoration(
+                      color: AppColors.gitDirty,
                       shape: BoxShape.circle,
                     ),
                   ),
@@ -97,23 +99,23 @@ class _GitStatusBadgeState extends State<GitStatusBadge> {
 
                 // Ahead/behind indicators
                 if (status.ahead > 0) ...[
-                  const SizedBox(width: 6),
+                  AppSpacing.gapHorizontalXs,
                   Text(
                     '↑${status.ahead}',
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 11,
-                      color: Colors.green[400],
+                      color: AppColors.gitAhead,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
                 ],
                 if (status.behind > 0) ...[
-                  const SizedBox(width: 4),
+                  AppSpacing.gapHorizontalXs,
                   Text(
                     '↓${status.behind}',
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 11,
-                      color: Colors.red[400],
+                      color: AppColors.gitBehind,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -157,11 +159,11 @@ class _GitStatusDropdown extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       elevation: 8,
-      borderRadius: BorderRadius.circular(12),
-      color: const Color(0xFF1F2937),
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      color: AppColors.surface,
       child: Container(
         width: 200,
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(AppSpacing.md),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -169,13 +171,14 @@ class _GitStatusDropdown extends StatelessWidget {
             // Branch
             Row(
               children: [
-                Icon(Icons.call_split, size: 16, color: Colors.grey[500]),
-                const SizedBox(width: 8),
+                const Icon(Icons.call_split, size: 16, color: AppColors.textMuted),
+                AppSpacing.gapHorizontalSm,
                 Expanded(
                   child: Text(
                     status.branch,
                     style: const TextStyle(
                       fontWeight: FontWeight.w500,
+                      color: AppColors.textPrimary,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -183,7 +186,7 @@ class _GitStatusDropdown extends StatelessWidget {
               ],
             ),
 
-            const SizedBox(height: 12),
+            AppSpacing.gapVerticalMd,
 
             // Status
             Row(
@@ -192,27 +195,27 @@ class _GitStatusDropdown extends StatelessWidget {
                   Container(
                     width: 8,
                     height: 8,
-                    decoration: BoxDecoration(
-                      color: Colors.yellow[400],
+                    decoration: const BoxDecoration(
+                      color: AppColors.gitDirty,
                       shape: BoxShape.circle,
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  AppSpacing.gapHorizontalSm,
                   Text(
                     '${status.changedFiles} file${status.changedFiles != 1 ? "s" : ""} changed',
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 13,
-                      color: Colors.yellow[300],
+                      color: AppColors.gitDirty,
                     ),
                   ),
                 ] else ...[
-                  Icon(Icons.check_circle, size: 16, color: Colors.green[400]),
-                  const SizedBox(width: 8),
-                  Text(
+                  const Icon(Icons.check_circle, size: 16, color: AppColors.gitClean),
+                  AppSpacing.gapHorizontalSm,
+                  const Text(
                     'Clean working tree',
                     style: TextStyle(
                       fontSize: 13,
-                      color: Colors.green[300],
+                      color: AppColors.gitClean,
                     ),
                   ),
                 ],
@@ -221,32 +224,32 @@ class _GitStatusDropdown extends StatelessWidget {
 
             // Ahead/behind
             if (status.ahead > 0 || status.behind > 0) ...[
-              const SizedBox(height: 8),
+              AppSpacing.gapVerticalSm,
               Row(
                 children: [
                   if (status.ahead > 0)
                     Text(
                       '↑ ${status.ahead} ahead',
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 12,
-                        color: Colors.green[400],
+                        color: AppColors.gitAhead,
                       ),
                     ),
                   if (status.ahead > 0 && status.behind > 0)
-                    const SizedBox(width: 12),
+                    AppSpacing.gapHorizontalMd,
                   if (status.behind > 0)
                     Text(
                       '↓ ${status.behind} behind',
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 12,
-                        color: Colors.red[400],
+                        color: AppColors.gitBehind,
                       ),
                     ),
                 ],
               ),
             ],
 
-            const Divider(height: 24),
+            const Divider(height: 24, color: AppColors.divider),
 
             // Refresh button
             SizedBox(
@@ -262,7 +265,7 @@ class _GitStatusDropdown extends StatelessWidget {
                     : const Icon(Icons.refresh, size: 14),
                 label: const Text('Refresh'),
                 style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
                 ),
               ),
             ),
