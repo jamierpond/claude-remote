@@ -95,6 +95,21 @@ Client-side chat interface:
 5. Server streams encrypted `{type: 'thinking'|'text', text, done}` events
 6. Phone decrypts and displays in real-time
 
+## Dev Logging
+
+All dev commands tee output to log files in `logs/`:
+
+- `pnpm dev` → `logs/server.log` + `logs/client.log`
+- `pnpm dev:server` → `logs/server.log`
+- `pnpm dev:client` → `logs/client.log`
+- `pnpm start` → `logs/server.log`
+
+Tail logs with:
+- `pnpm logs:server`
+- `pnpm logs:client`
+
+The `logs/` directory is gitignored.
+
 ## Verification
 
 1. `npm run dev` - starts server on port 3001
