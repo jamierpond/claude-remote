@@ -1,4 +1,4 @@
-.PHONY: get build run ios ios-sim ios-release clean doctor gen watch rebuild
+.PHONY: get build run ios ios-sim ios-release clean doctor gen watch rebuild web
 
 # Install dependencies
 get:
@@ -68,7 +68,7 @@ dev: get gen ios-sim
 
 # Web development
 web:
-	flutter run -d chrome --web-port 8080
+	flutter run -d web-server --web-port 8080
 
 build-web:
 	flutter build web

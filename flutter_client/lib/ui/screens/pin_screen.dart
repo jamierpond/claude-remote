@@ -142,11 +142,14 @@ class _PinScreenState extends ConsumerState<PinScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.xl),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            padding: const EdgeInsets.all(AppSpacing.xl),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight - AppSpacing.xl * 2),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
               const Icon(
                 Icons.lock_outline,
                 size: 64,
@@ -271,6 +274,8 @@ class _PinScreenState extends ConsumerState<PinScreen> {
                 ),
               ),
             ],
+          ),
+            ),
           ),
         ),
       ),
