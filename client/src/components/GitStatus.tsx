@@ -20,21 +20,26 @@ export default function GitStatus({ projectId }: GitStatusProps) {
 
   const fetchStatus = useCallback(async () => {
     if (!projectId) {
+      console.log('[GitStatus] No projectId, skipping fetch');
       setStatus(null);
       return;
     }
 
+    console.log('[GitStatus] Fetching git status for:', projectId);
     setLoading(true);
     try {
       const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/git`);
       if (!res.ok) {
         const data = await res.json();
+        console.error('[GitStatus] API error:', data);
         throw new Error(data.error || 'Failed to fetch git status');
       }
       const data = await res.json();
+      console.log('[GitStatus] Got status:', data);
       setStatus(data);
       setError(null);
     } catch (err) {
+      console.error('[GitStatus] Fetch failed:', err);
       setError(err instanceof Error ? err.message : 'Unknown error');
       setStatus(null);
     } finally {
