@@ -354,17 +354,24 @@ export default function Chat({ token }: Props) {
 
   const handlePinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('handlePinSubmit called', { pin: pin ? `${pin.length} digits` : 'empty' });
+
     if (!pin || pin.length < 4) {
-      setError('PIN must be at least 4 digits');
+      const msg = 'PIN must be at least 4 digits';
+      alert(msg);
+      setError(msg);
       return;
     }
 
     if (!sharedKeyRef.current) {
       try {
+        console.log('Restoring shared key...');
         await restoreSharedKey();
+        console.log('Shared key restored');
       } catch (err) {
-        const msg = `Failed to restore encryption keys: ${err}`;
+        const msg = `FATAL: Failed to restore encryption keys: ${err}`;
         console.error(msg, err);
+        alert(msg);
         setError(msg);
         return;
       }
@@ -372,58 +379,70 @@ export default function Chat({ token }: Props) {
 
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       try {
+        console.log('Connecting WebSocket...');
         await connectWebSocket();
+        console.log('WebSocket connected');
       } catch (err) {
-        const msg = `WebSocket connection failed: ${err}`;
+        const msg = `FATAL: WebSocket connection failed: ${err}`;
         console.error(msg);
+        alert(msg);
         setError(msg);
         return;
       }
     }
 
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      const err = 'WebSocket not connected after connect attempt';
+      const err = `FATAL: WebSocket not connected after connect attempt (state: ${wsRef.current?.readyState ?? 'null'})`;
       console.error(err);
+      alert(err);
       setError(err);
       return;
     }
 
     if (!sharedKeyRef.current) {
-      const err = 'Shared key is null - cannot encrypt';
+      const err = 'FATAL: Shared key is null after restore - cannot encrypt';
       console.error(err);
+      alert(err);
       setError(err);
       return;
     }
 
+    console.log('Sending auth message...');
     const encrypted = await encrypt(
       JSON.stringify({ type: 'auth', pin }),
       sharedKeyRef.current
     );
     wsRef.current.send(JSON.stringify(encrypted));
+    console.log('Auth message sent');
   };
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('handleSend called', { input, isStreaming, wsRef: wsRef.current, sharedKey: sharedKeyRef.current });
 
     if (!input.trim()) {
-      return; // Empty input is fine to ignore silently
+      return;
     }
 
     if (isStreaming) {
-      console.warn('Already streaming, ignoring send');
+      const msg = 'Already streaming - wait for response or click Cancel';
+      console.error(msg);
+      alert(msg);
       return;
     }
 
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      const err = 'WebSocket not connected - cannot send message';
-      console.error(err, { wsRef: wsRef.current, readyState: wsRef.current?.readyState });
+      const err = `FATAL: WebSocket not connected (state: ${wsRef.current?.readyState ?? 'null'}) - cannot send message`;
+      console.error(err);
+      alert(err);
       setError(err);
       return;
     }
 
     if (!sharedKeyRef.current) {
-      const err = 'Shared key is null - cannot encrypt message';
+      const err = 'FATAL: Shared key is null - cannot encrypt. Re-pair required.';
       console.error(err);
+      alert(err);
       setError(err);
       return;
     }
@@ -564,17 +583,28 @@ export default function Chat({ token }: Props) {
       </div>
 
       <div className="p-4 border-t border-gray-700">
-        {error && <p className="text-red-400 text-sm mb-2">{error}</p>}
+        {error && (
+          <div className="bg-red-900 border border-red-500 rounded-lg p-3 mb-2">
+            <p className="text-red-200 font-bold">ERROR:</p>
+            <p className="text-red-300 text-sm">{error}</p>
+          </div>
+        )}
         <form onSubmit={handleSend} className="flex gap-2">
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Type a message..."
-            disabled={isStreaming}
-            className="flex-1 p-3 bg-gray-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+            placeholder={isStreaming ? "Waiting for response..." : "Type a message..."}
+            className="flex-1 p-3 bg-gray-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
-          {isStreaming ? (
+          <button
+            type="submit"
+            disabled={!input.trim() || isStreaming}
+            className="px-4 py-3 bg-blue-600 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50"
+          >
+            Send
+          </button>
+          {isStreaming && (
             <button
               type="button"
               onClick={handleCancel}
@@ -582,15 +612,21 @@ export default function Chat({ token }: Props) {
             >
               Cancel
             </button>
-          ) : (
-            <button
-              type="submit"
-              disabled={!input.trim()}
-              className="px-4 py-3 bg-blue-600 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50"
-            >
-              Send
-            </button>
           )}
+          <button
+            type="button"
+            onClick={() => {
+              setIsStreaming(false);
+              setError('');
+              setCurrentThinking('');
+              setCurrentResponse('');
+              console.log('State reset by user');
+            }}
+            className="px-4 py-3 bg-gray-600 rounded-lg font-semibold hover:bg-gray-500 transition-colors"
+            title="Reset stuck state"
+          >
+            Reset
+          </button>
         </form>
       </div>
     </main>
