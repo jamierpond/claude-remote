@@ -16,8 +16,9 @@ import {
   EncryptedData,
 } from './src/lib/crypto';
 import {
-  loadDevice,
-  saveDevice,
+  loadDevices,
+  addDevice,
+  removeDevice,
   loadServerState,
   saveServerState,
   verifyPin,
@@ -45,16 +46,18 @@ if (!PIN) {
 
 let pinHash: string;
 let serverState: ServerState;
-let device: Device | null;
+let devices: Device[] = [];
 
 function initializeServer() {
-  device = loadDevice();
+  devices = loadDevices();
   const existingState = loadServerState();
 
-  if (existingState && device) {
-    serverState = { ...existingState, pairingToken: null };
-  } else if (existingState && !device) {
-    serverState = { ...existingState, pairingToken: randomBytes(16).toString('hex') };
+  if (existingState) {
+    // Always keep pairing token active for multi-device support
+    if (!existingState.pairingToken) {
+      existingState.pairingToken = randomBytes(16).toString('hex');
+    }
+    serverState = existingState;
   } else {
     const keyPair = generateKeyPair();
     serverState = {
@@ -67,11 +70,23 @@ function initializeServer() {
 }
 
 function reloadState() {
-  device = loadDevice();
+  devices = loadDevices();
   const existingState = loadServerState();
   if (existingState) {
     serverState = existingState;
   }
+}
+
+function findDeviceByDecryption(encrypted: EncryptedData): Device | null {
+  for (const device of devices) {
+    try {
+      decrypt(encrypted, device.sharedSecret);
+      return device;
+    } catch {
+      // Try next device
+    }
+  }
+  return null;
 }
 
 function json(res: ServerResponse, data: object, status = 200) {
@@ -97,12 +112,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   // API: Status - includes pairing URL when not paired
   if (pathname === '/api/status' && method === 'GET') {
     reloadState();
-    const clientPort = process.env.NODE_ENV === 'production' ? port : 5173;
     return json(res, {
       paired: !!device,
       deviceId: device?.id || null,
       pairedAt: device?.createdAt || null,
-      pairingUrl: serverState.pairingToken ? `http://localhost:${clientPort}/pair/${serverState.pairingToken}` : null,
+      pairingUrl: serverState.pairingToken ? `${clientUrl}/pair/${serverState.pairingToken}` : null,
     });
   }
 
@@ -198,8 +212,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
 
     // Log new pair URL
     if (serverState.pairingToken) {
-      const clientPort = process.env.NODE_ENV === 'production' ? port : 5173;
-      const pairUrl = `http://localhost:${clientPort}/pair/${serverState.pairingToken}`;
+      const pairUrl = `${clientUrl}/pair/${serverState.pairingToken}`;
       console.log('');
       console.log('> Unpaired! New pair URL:');
       console.log(`> ${pairUrl}`);
@@ -395,17 +408,16 @@ async function main() {
   });
 
   server.listen(port, () => {
-    console.log(`> Server ready on http://localhost:${port}`);
+    console.log(`> Server ready on ${serverUrl}`);
+    console.log(`> Client URL: ${clientUrl}`);
     if (serverState.pairingToken) {
-      const clientPort = process.env.NODE_ENV === 'production' ? port : 5173;
-      const pairUrl = `http://localhost:${clientPort}/pair/${serverState.pairingToken}`;
+      const pairUrl = `${clientUrl}/pair/${serverState.pairingToken}`;
       console.log(`> Pair URL: ${pairUrl}`);
       console.log('');
       qrcode.generate(pairUrl, { small: true });
     } else {
-      const clientPort = process.env.NODE_ENV === 'production' ? port : 5173;
       console.log('> Device already paired');
-      console.log(`> Go to http://localhost:${clientPort} to chat or unpair`);
+      console.log(`> Go to ${clientUrl} to chat or unpair`);
     }
   });
 }

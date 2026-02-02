@@ -41,6 +41,39 @@ function ensureConfigDir() {
   }
 }
 
+export function loadDevices(): Device[] {
+  try {
+    const path = join(CONFIG_DIR, 'devices.json');
+    if (!existsSync(path)) return [];
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return [];
+  }
+}
+
+export function saveDevices(devices: Device[]): void {
+  ensureConfigDir();
+  writeFileSync(join(CONFIG_DIR, 'devices.json'), JSON.stringify(devices, null, 2));
+}
+
+export function addDevice(device: Device): void {
+  const devices = loadDevices();
+  devices.push(device);
+  saveDevices(devices);
+}
+
+export function removeDevice(deviceId: string): void {
+  const devices = loadDevices();
+  const filtered = devices.filter(d => d.id !== deviceId);
+  saveDevices(filtered);
+}
+
+export function getDeviceById(deviceId: string): Device | null {
+  const devices = loadDevices();
+  return devices.find(d => d.id === deviceId) || null;
+}
+
+// Legacy single device support (deprecated)
 export function loadDevice(): Device | null {
   try {
     const path = join(CONFIG_DIR, 'device.json');
