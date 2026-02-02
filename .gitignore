@@ -43,7 +43,6 @@ dev.log
 logs/
 dist/
 .direnv/
-.envrc
 
 # Flutter
 flutter_client/.dart_tool/
