@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'colors.dart';
 
 /// App typography - consistent text styles throughout the app
@@ -6,6 +7,25 @@ class AppTypography {
   AppTypography._();
 
   static const String _fontFamily = '.SF Pro Text';
+
+  /// Cross-platform monospace text style using JetBrains Mono
+  static TextStyle mono({
+    double fontSize = 13,
+    FontWeight fontWeight = FontWeight.w400,
+    Color color = AppColors.textPrimary,
+    double height = 1.5,
+    Color? backgroundColor,
+    TextDecoration? decoration,
+  }) {
+    return GoogleFonts.jetBrainsMono(
+      fontSize: fontSize,
+      fontWeight: fontWeight,
+      color: color,
+      height: height,
+      backgroundColor: backgroundColor,
+      decoration: decoration,
+    );
+  }
 
   // === Headlines ===
   static const TextStyle headline = TextStyle(
@@ -95,20 +115,11 @@ class AppTypography {
   );
 
   // === Code/Mono ===
-  static const TextStyle code = TextStyle(
-    fontFamily: 'SF Mono',
-    fontSize: 13,
-    fontWeight: FontWeight.w400,
-    color: AppColors.textPrimary,
-    height: 1.5,
-  );
+  static TextStyle get code => mono(fontSize: 13);
 
-  static const TextStyle codeSmall = TextStyle(
-    fontFamily: 'SF Mono',
-    fontSize: 12,
-    fontWeight: FontWeight.w400,
-    color: AppColors.textSecondary,
-  );
+  static TextStyle get codeSmall => mono(fontSize: 12, color: AppColors.textSecondary);
+
+  static TextStyle get codeTiny => mono(fontSize: 11);
 
   // === Button Text ===
   static const TextStyle button = TextStyle(
