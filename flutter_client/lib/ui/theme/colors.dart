@@ -5,9 +5,9 @@ class AppColors {
   AppColors._();
 
   // === Base Palette ===
-  static const Color terracotta = Color(0xFFEC4899); // Pink-500
-  static const Color terracottaLight = Color(0xFFF472B6); // Pink-400
-  static const Color terracottaDark = Color(0xFFDB2777); // Pink-600
+  static const Color terracotta = Color(0xFFD97757);
+  static const Color terracottaLight = Color(0xFFE8886A);
+  static const Color terracottaDark = Color(0xFFC4644A);
   static const Color warmBlack = Color(0xFF1A1816);
   static const Color warmDark = Color(0xFF252220);
   static const Color warmGrey = Color(0xFF3D3632);

@@ -39,6 +39,28 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
     });
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Listen for task state changes to scroll to bottom
+    ref.listenManual(activeTaskStateProvider, (previous, next) {
+      // Scroll to bottom when messages change or streaming starts
+      if (previous?.messages.length != next.messages.length ||
+          (previous?.isStreaming == false && next.isStreaming == true) ||
+          previous?.currentTask?.outputChunks.length != next.currentTask?.outputChunks.length) {
+        _scrollToBottom();
+      }
+    });
+
+    // Scroll to bottom when active project changes
+    ref.listenManual(projectProvider, (previous, next) {
+      if (previous?.activeProjectId != next.activeProjectId) {
+        // Delay to allow messages to load
+        Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
+      }
+    });
+  }
+
   void _checkInitialProjectPicker() {
     if (_initialPickerShown) return;
     final projectState = ref.read(projectProvider);
@@ -67,6 +89,18 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
     storage.saveInputDraft(_inputController.text);
     if (_scrollController.hasClients) {
       storage.saveScrollPosition(_scrollController.offset);
+    }
+  }
+
+  void _scrollToBottom() {
+    if (_scrollController.hasClients) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      });
     }
   }
 
