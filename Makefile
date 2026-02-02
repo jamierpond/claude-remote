@@ -5,16 +5,17 @@ deps:
 	pnpm install
 	cd flutter_client && flutter pub get
 
-# Full install: deps + PM2 daemon setup
+# Full install: deps + systemd daemon setup
 install: deps
-	@echo "Setting up PM2 daemon..."
-	@which pm2 > /dev/null || npm install -g pm2
-	@pm2 describe claude-remote > /dev/null 2>&1 && pm2 delete claude-remote || true
-	@pm2 start ecosystem.config.js
-	@pm2 save
+	@echo "Installing systemd service..."
+	@mkdir -p ~/.config/systemd/user
+	@cp claude-remote.service ~/.config/systemd/user/
+	@systemctl --user daemon-reload
+	@systemctl --user enable claude-remote
+	@systemctl --user restart claude-remote
 	@echo ""
 	@echo "Daemon installed and running."
-	@echo "Run 'pm2 startup' and follow instructions to enable auto-start on boot."
+	@echo "Run 'sudo loginctl enable-linger $(USER)' to keep it running when logged out."
 
 # Run server + Flutter web client (with hot reload)
 # Server: tsx --watch auto-restarts on .ts file changes
@@ -49,26 +50,26 @@ build:
 
 # Start daemon (production)
 start:
-	@pm2 start ecosystem.config.js 2>/dev/null || pm2 restart claude-remote
+	@systemctl --user start claude-remote
 	@echo "Daemon started. Use 'make logs' to view output."
 
 # Stop daemon
 stop:
-	@pm2 stop claude-remote
+	@systemctl --user stop claude-remote
 	@echo "Daemon stopped."
 
 # Restart daemon (production)
 restart:
-	@pm2 restart claude-remote
+	@systemctl --user restart claude-remote
 	@echo "Daemon restarted."
 
 # Daemon status
 status:
-	@pm2 status claude-remote
+	@systemctl --user status claude-remote
 
 # Daemon logs (follow mode)
 logs:
-	@pm2 logs claude-remote --lines 50
+	@tail -f logs/daemon-server.log
 
 # Trigger reload for all dev processes
 # - Touches server.ts to trigger tsx --watch restart
@@ -116,9 +117,10 @@ clean:
 
 # Uninstall daemon
 uninstall:
-	@pm2 stop claude-remote 2>/dev/null || true
-	@pm2 delete claude-remote 2>/dev/null || true
-	@pm2 save
+	@systemctl --user stop claude-remote 2>/dev/null || true
+	@systemctl --user disable claude-remote 2>/dev/null || true
+	@rm -f ~/.config/systemd/user/claude-remote.service
+	@systemctl --user daemon-reload
 	@echo "Daemon removed."
 
 # Nix/direnv setup
