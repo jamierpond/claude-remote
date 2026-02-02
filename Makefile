@@ -12,7 +12,7 @@ dev:
 	@mkdir -p logs
 	@echo "Starting server and Flutter web client..."
 	@(pnpm tsx --watch server.ts 2>&1 | tee logs/server.log) & \
-	(cd flutter_client && flutter run -d web-server --web-port=3000 2>&1 | tee ../logs/flutter.log)
+	(cd flutter_client && flutter run -d web-server --web-port=5173 2>&1 | tee ../logs/flutter.log)
 
 # Run both server and React web client (with hot reload)
 # Server: tsx --watch auto-restarts on .ts file changes
