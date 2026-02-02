@@ -34,6 +34,8 @@ import {
 import { spawnClaude, ClaudeEvent } from './src/lib/claude';
 
 const port = parseInt(process.env.PORT || '6767', 10);
+const clientUrl = process.env.CLIENT_URL || `http://localhost:5173`;
+const serverUrl = process.env.SERVER_URL || `http://localhost:${port}`;
 
 const PIN = process.env.CLAUDE_REMOTE_PIN;
 if (!PIN) {
