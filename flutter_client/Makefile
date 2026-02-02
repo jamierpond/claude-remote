@@ -65,3 +65,10 @@ setup: get gen pods
 
 # Dev workflow: get deps, generate code, run on iOS sim
 dev: get gen ios-sim
+
+# Web development
+web:
+	flutter run -d chrome --web-port 8080
+
+build-web:
+	flutter build web
