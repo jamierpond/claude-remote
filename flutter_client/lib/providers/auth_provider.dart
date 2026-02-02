@@ -104,7 +104,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   /// Pair with a new server and add it to the list
   Future<void> pair(String serverUrl, String token) async {
-    final getUrl = '$serverUrl/api/pair/$token';
+    final getUrl = '$serverUrl/pair/$token';
 
     // Step 1: Generate key pair
     debugPrint('[AUTH] Step 1: Generating key pair...');

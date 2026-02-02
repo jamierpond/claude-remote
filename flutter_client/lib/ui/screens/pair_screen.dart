@@ -39,7 +39,7 @@ class _PairScreenState extends ConsumerState<PairScreen> {
   }
 
   /// Parse a pairing URL and extract server URL + token
-  /// New format: https://ai-server.pond.audio/api/pair/TOKEN
+  /// Format: https://ai-server.pond.audio/pair/TOKEN
   /// serverUrl = https://ai-server.pond.audio
   /// token = TOKEN
   void _parseUrl(String url, {String source = 'INPUT'}) {
@@ -58,21 +58,15 @@ class _PairScreenState extends ConsumerState<PairScreen> {
 
     _addLog('[$source] host=${uri.host} path=${uri.path}');
 
-    // New format: /api/pair/TOKEN
-    // Extract token from path segments
+    // Format: /pair/TOKEN
     final segments = uri.pathSegments;
 
-    // Handle both old format (/pair/TOKEN) and new format (/api/pair/TOKEN)
     String? token;
-    if (segments.length >= 2 && segments[0] == 'api' && segments[1] == 'pair' && segments.length >= 3) {
-      // New format: /api/pair/TOKEN
-      token = segments[2];
-    } else if (segments.length >= 2 && segments[0] == 'pair') {
-      // Old format: /pair/TOKEN (legacy client URL)
+    if (segments.length >= 2 && segments[0] == 'pair') {
+      // /pair/TOKEN
       token = segments[1];
-      _addLog('[$source] WARNING: Using legacy URL format, mapping may be needed');
     } else {
-      setState(() => _error = 'Invalid path. Expected /api/pair/TOKEN, got ${uri.path}');
+      setState(() => _error = 'Invalid path. Expected /pair/TOKEN, got ${uri.path}');
       return;
     }
 
@@ -123,7 +117,7 @@ class _PairScreenState extends ConsumerState<PairScreen> {
       _error = null;
     });
 
-    _addLog('[PAIR] Starting: $_serverUrl/api/pair/$_token');
+    _addLog('[PAIR] Starting: $_serverUrl/pair/$_token');
 
     try {
       await ref.read(authStateProvider.notifier).pair(_serverUrl!, _token!);
@@ -229,7 +223,7 @@ class _PairScreenState extends ConsumerState<PairScreen> {
                                   controller: _urlController,
                                   style: AppTypography.mono(fontSize: 13, color: AppColors.textPrimary),
                                   decoration: InputDecoration(
-                                    hintText: 'https://server.example/api/pair/...',
+                                    hintText: 'https://server.example/pair/...',
                                     hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
                                     filled: true,
                                     fillColor: AppColors.surface,
