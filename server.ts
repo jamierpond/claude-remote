@@ -109,13 +109,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     return;
   }
 
-  // API: Status - includes pairing URL when not paired
+  // API: Status - includes pairing URL (always available for multi-device)
   if (pathname === '/api/status' && method === 'GET') {
     reloadState();
     return json(res, {
-      paired: !!device,
-      deviceId: device?.id || null,
-      pairedAt: device?.createdAt || null,
+      paired: devices.length > 0,
+      devices: devices.map(d => ({ id: d.id, createdAt: d.createdAt })),
+      deviceCount: devices.length,
       pairingUrl: serverState.pairingToken ? `${clientUrl}/pair/${serverState.pairingToken}` : null,
     });
   }
@@ -139,9 +139,6 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     reloadState();
     const token = pathname.split('/api/pair/')[1];
 
-    if (device) {
-      return json(res, { error: 'Already paired' }, 400);
-    }
     if (!serverState || serverState.pairingToken !== token) {
       return json(res, { error: 'Invalid token' }, 400);
     }
@@ -149,14 +146,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     return json(res, { serverPublicKey: serverState.publicKey });
   }
 
-  // API: Pair POST - complete pairing
+  // API: Pair POST - complete pairing (allows multiple devices)
   if (pathname?.startsWith('/api/pair/') && method === 'POST') {
     reloadState();
     const token = pathname.split('/api/pair/')[1];
 
-    if (device) {
-      return json(res, { error: 'Already paired' }, 400);
-    }
     if (!serverState || serverState.pairingToken !== token) {
       return json(res, { error: 'Invalid token' }, 400);
     }
@@ -179,10 +173,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       createdAt: new Date().toISOString(),
     };
 
-    saveDevice(newDevice);
-    device = newDevice;
-    serverState.pairingToken = null;
-    saveServerState(serverState);
+    addDevice(newDevice);
+    devices = loadDevices();
+    console.log(`> New device paired: ${newDevice.id} (total: ${devices.length})`);
 
     return json(res, { serverPublicKey: serverState.publicKey, deviceId: newDevice.id });
   }
