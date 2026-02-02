@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -16,39 +17,42 @@ class PairScreen extends ConsumerStatefulWidget {
 }
 
 class _PairScreenState extends ConsumerState<PairScreen> {
+  final _urlController = TextEditingController();
   bool _showScanner = false;
   bool _isPairing = false;
-  String? _scannedUrl;
+  String? _inputUrl;
   String? _serverUrl;
   String? _token;
   String? _error;
   String _log = '';
+
+  @override
+  void dispose() {
+    _urlController.dispose();
+    super.dispose();
+  }
 
   void _addLog(String msg) {
     debugPrint(msg);
     setState(() => _log = '$_log\n$msg');
   }
 
-  void _onDetect(BarcodeCapture capture) {
-    final code = capture.barcodes.firstOrNull?.rawValue;
-    if (code == null) return;
-
-    _addLog('[SCAN] Detected: $code');
+  /// Parse a pairing URL and extract server URL + token
+  void _parseUrl(String url, {String source = 'INPUT'}) {
+    _addLog('[$source] Parsing: $url');
 
     setState(() {
-      _showScanner = false;
-      _scannedUrl = code;
+      _inputUrl = url;
       _error = null;
     });
 
-    // Parse the URL
-    final uri = Uri.tryParse(code);
+    final uri = Uri.tryParse(url.trim());
     if (uri == null) {
-      setState(() => _error = 'Failed to parse URL: $code');
+      setState(() => _error = 'Failed to parse URL: $url');
       return;
     }
 
-    _addLog('[SCAN] host=${uri.host} path=${uri.path}');
+    _addLog('[$source] host=${uri.host} path=${uri.path}');
 
     // Extract token from path
     final segments = uri.pathSegments;
@@ -70,7 +74,7 @@ class _PairScreenState extends ConsumerState<PairScreen> {
       if (uri.hasPort) serverUrl += ':${uri.port}';
     }
 
-    _addLog('[SCAN] serverUrl=$serverUrl token=$token');
+    _addLog('[$source] serverUrl=$serverUrl token=$token');
 
     setState(() {
       _serverUrl = serverUrl;
@@ -78,9 +82,34 @@ class _PairScreenState extends ConsumerState<PairScreen> {
     });
   }
 
+  void _onDetect(BarcodeCapture capture) {
+    final code = capture.barcodes.firstOrNull?.rawValue;
+    if (code == null) return;
+
+    setState(() => _showScanner = false);
+    _parseUrl(code, source: 'QR');
+  }
+
+  void _onPasteUrl() {
+    final url = _urlController.text.trim();
+    if (url.isEmpty) {
+      setState(() => _error = 'Please enter a URL');
+      return;
+    }
+    _parseUrl(url, source: 'PASTE');
+  }
+
+  Future<void> _pasteFromClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    if (data?.text != null && data!.text!.isNotEmpty) {
+      _urlController.text = data.text!;
+      _onPasteUrl();
+    }
+  }
+
   Future<void> _doPairing() async {
     if (_serverUrl == null || _token == null) {
-      setState(() => _error = 'No server URL or token. Scan a QR code first.');
+      setState(() => _error = 'No server URL or token. Scan QR or paste link first.');
       return;
     }
 
@@ -115,7 +144,7 @@ class _PairScreenState extends ConsumerState<PairScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Error display - always visible if error
+            // Error display
             if (_error != null)
               Container(
                 width: double.infinity,
@@ -140,7 +169,7 @@ class _PairScreenState extends ConsumerState<PairScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          // Scan button
+                          // === Option 1: QR Code ===
                           ElevatedButton.icon(
                             onPressed: () => setState(() => _showScanner = true),
                             icon: const Icon(Icons.qr_code_scanner),
@@ -152,19 +181,82 @@ class _PairScreenState extends ConsumerState<PairScreen> {
                             ),
                           ),
 
+                          AppSpacing.gapVerticalLg,
+
+                          // Divider
+                          Row(
+                            children: [
+                              const Expanded(child: Divider(color: AppColors.border)),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                                child: Text('OR', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                              ),
+                              const Expanded(child: Divider(color: AppColors.border)),
+                            ],
+                          ),
+
+                          AppSpacing.gapVerticalLg,
+
+                          // === Option 2: Paste Link ===
+                          const Text(
+                            'Paste pairing link',
+                            style: TextStyle(color: AppColors.textSecondary, fontSize: 14, fontWeight: FontWeight.w500),
+                          ),
+                          AppSpacing.gapVerticalSm,
+
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: _urlController,
+                                  style: const TextStyle(fontFamily: 'SF Mono', fontSize: 13, color: AppColors.textPrimary),
+                                  decoration: InputDecoration(
+                                    hintText: 'https://ai.pond.audio/pair/...',
+                                    hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                                    filled: true,
+                                    fillColor: AppColors.surface,
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(AppRadius.sm),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.md),
+                                  ),
+                                  onSubmitted: (_) => _onPasteUrl(),
+                                ),
+                              ),
+                              AppSpacing.gapHorizontalSm,
+                              IconButton(
+                                onPressed: _pasteFromClipboard,
+                                icon: const Icon(Icons.content_paste, color: AppColors.primary),
+                                tooltip: 'Paste from clipboard',
+                                style: IconButton.styleFrom(
+                                  backgroundColor: AppColors.surface,
+                                  padding: const EdgeInsets.all(AppSpacing.md),
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          AppSpacing.gapVerticalSm,
+
+                          OutlinedButton.icon(
+                            onPressed: _onPasteUrl,
+                            icon: const Icon(Icons.link),
+                            label: const Text('USE LINK'),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.all(16),
+                              foregroundColor: AppColors.primary,
+                              side: const BorderSide(color: AppColors.primary),
+                            ),
+                          ),
+
                           AppSpacing.gapVerticalXl,
 
-                          // Scanned URL
-                          _infoBox('Scanned URL', _scannedUrl ?? '(none)'),
-
+                          // Parsed info
+                          _infoBox('Input URL', _inputUrl ?? '(none)'),
                           AppSpacing.gapVerticalMd,
-
-                          // Derived server URL
                           _infoBox('Server URL', _serverUrl ?? '(none)'),
-
                           AppSpacing.gapVerticalMd,
-
-                          // Token
                           _infoBox('Token', _token ?? '(none)'),
 
                           AppSpacing.gapVerticalXl,
