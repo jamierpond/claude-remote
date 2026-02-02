@@ -20,7 +20,41 @@ class GitStatusBadge extends StatefulWidget {
 }
 
 class _GitStatusBadgeState extends State<GitStatusBadge> {
-  bool _expanded = false;
+  void _showDropdown(BuildContext context) {
+    final RenderBox badge = context.findRenderObject() as RenderBox;
+    final Offset offset = badge.localToGlobal(Offset.zero);
+    final Size size = badge.size;
+
+    showDialog(
+      context: context,
+      barrierColor: Colors.transparent,
+      builder: (dialogContext) => Stack(
+        children: [
+          // Tap outside to dismiss
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: () => Navigator.of(dialogContext).pop(),
+              child: Container(color: Colors.transparent),
+            ),
+          ),
+          // Dropdown positioned below badge
+          Positioned(
+            top: offset.dy + size.height + 4,
+            right: MediaQuery.of(context).size.width - offset.dx - size.width,
+            child: _GitStatusDropdown(
+              status: widget.status!,
+              isLoading: widget.isLoading,
+              onRefresh: () {
+                widget.onRefresh?.call();
+                Navigator.of(dialogContext).pop();
+              },
+              onClose: () => Navigator.of(dialogContext).pop(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -46,97 +80,78 @@ class _GitStatusBadgeState extends State<GitStatusBadge> {
     final status = widget.status!;
 
     return GestureDetector(
-      onTap: () => setState(() => _expanded = !_expanded),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          // Main badge
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
-            decoration: BoxDecoration(
-              color: status.isDirty
-                  ? AppColors.gitDirty.withOpacity(0.15)
-                  : AppColors.surfaceVariant,
-              borderRadius: BorderRadius.circular(AppRadius.sm),
+      onTap: () => _showDropdown(context),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
+        decoration: BoxDecoration(
+          color: status.isDirty
+              ? AppColors.gitDirty.withValues(alpha: 0.15)
+              : AppColors.surfaceVariant,
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Branch icon
+            Icon(
+              Icons.call_split,
+              size: 14,
+              color: status.isDirty ? AppColors.gitDirty : AppColors.textSecondary,
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Branch icon
-                Icon(
-                  Icons.call_split,
-                  size: 14,
+            AppSpacing.gapHorizontalXs,
+
+            // Branch name
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 100),
+              child: Text(
+                status.branch,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
                   color: status.isDirty ? AppColors.gitDirty : AppColors.textSecondary,
                 ),
-                AppSpacing.gapHorizontalXs,
-
-                // Branch name
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 100),
-                  child: Text(
-                    status.branch,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: status.isDirty ? AppColors.gitDirty : AppColors.textSecondary,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-
-                // Dirty indicator
-                if (status.isDirty) ...[
-                  AppSpacing.gapHorizontalXs,
-                  Container(
-                    width: 6,
-                    height: 6,
-                    decoration: const BoxDecoration(
-                      color: AppColors.gitDirty,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ],
-
-                // Ahead/behind indicators
-                if (status.ahead > 0) ...[
-                  AppSpacing.gapHorizontalXs,
-                  Text(
-                    '↑${status.ahead}',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: AppColors.gitAhead,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-                if (status.behind > 0) ...[
-                  AppSpacing.gapHorizontalXs,
-                  Text(
-                    '↓${status.behind}',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: AppColors.gitBehind,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-
-          // Expanded dropdown
-          if (_expanded)
-            Positioned(
-              top: 32,
-              right: 0,
-              child: _GitStatusDropdown(
-                status: status,
-                isLoading: widget.isLoading,
-                onRefresh: widget.onRefresh,
-                onClose: () => setState(() => _expanded = false),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-        ],
+
+            // Dirty indicator
+            if (status.isDirty) ...[
+              AppSpacing.gapHorizontalXs,
+              Container(
+                width: 6,
+                height: 6,
+                decoration: const BoxDecoration(
+                  color: AppColors.gitDirty,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ],
+
+            // Ahead/behind indicators
+            if (status.ahead > 0) ...[
+              AppSpacing.gapHorizontalXs,
+              Text(
+                '↑${status.ahead}',
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: AppColors.gitAhead,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+            if (status.behind > 0) ...[
+              AppSpacing.gapHorizontalXs,
+              Text(
+                '↓${status.behind}',
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: AppColors.gitBehind,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

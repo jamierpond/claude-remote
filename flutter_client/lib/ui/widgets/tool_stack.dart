@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:pretty_diff_text/pretty_diff_text.dart';
 import '../../models/tool_activity.dart';
 import '../theme/colors.dart';
 import '../theme/spacing.dart';
@@ -445,17 +446,15 @@ class _ToolCardState extends State<ToolCard> {
           ],
         );
       case 'Edit':
+        final oldStr = input['old_string'] as String? ?? '';
+        final newStr = input['new_string'] as String? ?? '';
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _codeBlock(input['file_path'] as String? ?? ''),
-            if (input['old_string'] != null) ...[
+            if (oldStr.isNotEmpty || newStr.isNotEmpty) ...[
               AppSpacing.gapVerticalXs,
-              _diffBlock(input['old_string'] as String, isRemoval: true),
-            ],
-            if (input['new_string'] != null) ...[
-              AppSpacing.gapVerticalXs,
-              _diffBlock(input['new_string'] as String, isRemoval: false),
+              _diffBlock(oldStr, newStr),
             ],
           ],
         );
@@ -546,29 +545,39 @@ class _ToolCardState extends State<ToolCard> {
     );
   }
 
-  Widget _diffBlock(String text, {required bool isRemoval}) {
-    final preview = text.length > 200 ? '${text.substring(0, 200)}...' : text;
+  Widget _diffBlock(String oldText, String newText) {
+    // Limit preview size
+    final oldPreview = oldText.length > 500 ? '${oldText.substring(0, 500)}...' : oldText;
+    final newPreview = newText.length > 500 ? '${newText.substring(0, 500)}...' : newText;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppSpacing.sm),
       decoration: BoxDecoration(
-        color: isRemoval
-            ? AppColors.error.withOpacity(0.1)
-            : AppColors.success.withOpacity(0.1),
+        color: AppColors.background,
         borderRadius: BorderRadius.circular(4),
-        border: Border(
-          left: BorderSide(
-            color: isRemoval ? AppColors.error : AppColors.success,
-            width: 2,
-          ),
-        ),
+        border: Border.all(color: AppColors.border),
       ),
-      child: Text(
-        '${isRemoval ? '-' : '+'} $preview',
-        style: TextStyle(
+      child: PrettyDiffText(
+        oldText: oldPreview,
+        newText: newPreview,
+        defaultTextStyle: const TextStyle(
           fontFamily: 'SF Mono',
           fontSize: 11,
-          color: isRemoval ? AppColors.error : AppColors.success,
+          color: AppColors.textPrimary,
+        ),
+        addedTextStyle: const TextStyle(
+          fontFamily: 'SF Mono',
+          fontSize: 11,
+          color: AppColors.success,
+          backgroundColor: Color(0x205AAD6A),
+        ),
+        deletedTextStyle: const TextStyle(
+          fontFamily: 'SF Mono',
+          fontSize: 11,
+          color: AppColors.error,
+          backgroundColor: Color(0x20E85A5A),
+          decoration: TextDecoration.lineThrough,
         ),
       ),
     );
