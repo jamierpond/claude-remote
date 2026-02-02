@@ -259,7 +259,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       paired: devices.length > 0,
       devices: devices.map(d => ({ id: d.id, createdAt: d.createdAt })),
       deviceCount: devices.length,
-      pairingUrl: serverState.pairingToken ? `${clientUrl}/pair/${serverState.pairingToken}` : null,
+      pairingUrl: serverState.pairingToken ? `${serverUrl}/api/pair/${serverState.pairingToken}` : null,
     });
   }
 
@@ -913,7 +913,7 @@ async function main() {
     console.log(`> Client URL: ${clientUrl}`);
     console.log(`> Paired devices: ${devices.length}`);
     if (serverState.pairingToken) {
-      const pairUrl = `${clientUrl}/pair/${serverState.pairingToken}`;
+      const pairUrl = `${serverUrl}/api/pair/${serverState.pairingToken}`;
       console.log(`> Pair URL: ${pairUrl}`);
       console.log('');
       qrcode.generate(pairUrl, { small: true });

@@ -9,29 +9,34 @@ import 'providers/auth_provider.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authStateProvider);
-  
+
   return GoRouter(
     initialLocation: '/',
     redirect: (context, state) {
-      final isPaired = authState.isPaired;
+      // Wait for auth state to load
+      if (authState.isLoading) {
+        return null;
+      }
+
+      final hasServers = authState.servers.isNotEmpty;
       final isAuthenticated = authState.isAuthenticated;
       final path = state.uri.path;
-      
-      // Not paired -> pair screen
-      if (!isPaired && path != '/pair') {
+
+      // No servers paired -> pair screen
+      if (!hasServers && path != '/pair') {
         return '/pair';
       }
-      
-      // Paired but not authenticated -> pin screen
-      if (isPaired && !isAuthenticated && path != '/pin') {
+
+      // Has servers but not authenticated -> pin screen
+      if (hasServers && !isAuthenticated && path != '/pin' && path != '/pair') {
         return '/pin';
       }
-      
+
       // Authenticated -> task screen
       if (isAuthenticated && (path == '/pair' || path == '/pin' || path == '/')) {
         return '/task';
       }
-      
+
       return null;
     },
     routes: [
@@ -64,7 +69,7 @@ class ClaudeRemoteApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(routerProvider);
-    
+
     return MaterialApp.router(
       title: 'Claude Remote',
       debugShowCheckedModeBanner: false,

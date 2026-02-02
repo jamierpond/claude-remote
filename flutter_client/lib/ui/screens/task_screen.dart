@@ -12,6 +12,7 @@ import '../theme/spacing.dart';
 import '../widgets/project_tabs.dart';
 import '../widgets/project_picker.dart';
 import '../widgets/git_status_badge.dart';
+import '../widgets/server_switcher.dart';
 import '../widgets/task_header.dart';
 import '../widgets/thinking_panel.dart';
 import '../widgets/tool_stack.dart';
@@ -250,6 +251,8 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
   }
 
   Widget _buildHeader(ProjectState projectState, ProjectTaskState taskState) {
+    final authState = ref.watch(authStateProvider);
+    final activeServer = authState.activeServer;
     final activeProject = projectState.activeProject;
     final gitStatus = projectState.activeGitStatus;
 
@@ -263,6 +266,52 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
       ),
       child: Row(
         children: [
+          // Server chip (tappable to switch servers)
+          if (activeServer != null)
+            GestureDetector(
+              onTap: () => showServerSwitcher(context),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.sm,
+                  vertical: AppSpacing.xs,
+                ),
+                margin: const EdgeInsets.only(right: AppSpacing.md),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: authState.isAuthenticated ? AppColors.success : AppColors.warning,
+                      ),
+                    ),
+                    AppSpacing.gapHorizontalXs,
+                    Text(
+                      activeServer.name,
+                      style: const TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    AppSpacing.gapHorizontalXs,
+                    Icon(
+                      Icons.unfold_more,
+                      size: 12,
+                      color: AppColors.textMuted,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
           // Project name
           Expanded(
             child: Text(

@@ -39,6 +39,9 @@ class _PairScreenState extends ConsumerState<PairScreen> {
   }
 
   /// Parse a pairing URL and extract server URL + token
+  /// New format: https://ai-server.pond.audio/api/pair/TOKEN
+  /// serverUrl = https://ai-server.pond.audio
+  /// token = TOKEN
   void _parseUrl(String url, {String source = 'INPUT'}) {
     _addLog('[$source] Parsing: $url');
 
@@ -55,25 +58,26 @@ class _PairScreenState extends ConsumerState<PairScreen> {
 
     _addLog('[$source] host=${uri.host} path=${uri.path}');
 
-    // Extract token from path
+    // New format: /api/pair/TOKEN
+    // Extract token from path segments
     final segments = uri.pathSegments;
-    if (segments.length < 2 || segments[0] != 'pair') {
-      setState(() => _error = 'Invalid path. Expected /pair/TOKEN, got ${uri.path}');
+
+    // Handle both old format (/pair/TOKEN) and new format (/api/pair/TOKEN)
+    String? token;
+    if (segments.length >= 2 && segments[0] == 'api' && segments[1] == 'pair' && segments.length >= 3) {
+      // New format: /api/pair/TOKEN
+      token = segments[2];
+    } else if (segments.length >= 2 && segments[0] == 'pair') {
+      // Old format: /pair/TOKEN (legacy client URL)
+      token = segments[1];
+      _addLog('[$source] WARNING: Using legacy URL format, mapping may be needed');
+    } else {
+      setState(() => _error = 'Invalid path. Expected /api/pair/TOKEN, got ${uri.path}');
       return;
     }
 
-    final token = segments[1];
-
-    // Map client URL to server URL
-    String serverUrl;
-    if (uri.host == 'localhost' || uri.host == '127.0.0.1') {
-      serverUrl = '${uri.scheme}://${uri.host}:6767';
-    } else if (uri.host == 'ai.pond.audio') {
-      serverUrl = 'https://ai-server.pond.audio';
-    } else {
-      serverUrl = '${uri.scheme}://${uri.host}';
-      if (uri.hasPort) serverUrl += ':${uri.port}';
-    }
+    // Server URL is the base URL (strip the path)
+    final serverUrl = '${uri.scheme}://${uri.host}${uri.hasPort ? ':${uri.port}' : ''}';
 
     _addLog('[$source] serverUrl=$serverUrl token=$token');
 
@@ -140,8 +144,21 @@ class _PairScreenState extends ConsumerState<PairScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final authState = ref.watch(authStateProvider);
+    final hasExistingServers = authState.servers.isNotEmpty;
+
     return Scaffold(
       backgroundColor: _error != null ? AppColors.errorMuted : AppColors.background,
+      appBar: hasExistingServers
+          ? AppBar(
+              backgroundColor: AppColors.background,
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () => context.go('/pin'),
+              ),
+              title: const Text('Add Server'),
+            )
+          : null,
       body: SafeArea(
         child: Column(
           children: [
@@ -212,7 +229,7 @@ class _PairScreenState extends ConsumerState<PairScreen> {
                                   controller: _urlController,
                                   style: AppTypography.mono(fontSize: 13, color: AppColors.textPrimary),
                                   decoration: InputDecoration(
-                                    hintText: 'https://ai.pond.audio/pair/...',
+                                    hintText: 'https://server.example/api/pair/...',
                                     hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
                                     filled: true,
                                     fillColor: AppColors.surface,
