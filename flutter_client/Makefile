@@ -1,4 +1,4 @@
-.PHONY: get build run ios ios-sim ios-release clean doctor gen watch rebuild
+.PHONY: get build run ios ios-sim ios-release clean doctor gen watch rebuild web
 
 # Install dependencies
 get:
@@ -18,7 +18,7 @@ run:
 
 # iOS development (physical device)
 ios:
-	flutter run -d pond
+	flutter run -d pond -v
 
 ios-sim:
 	flutter run -d "iPhone"
@@ -65,3 +65,10 @@ setup: get gen pods
 
 # Dev workflow: get deps, generate code, run on iOS sim
 dev: get gen ios-sim
+
+# Web development
+web:
+	flutter run -d web-server --web-port 8080
+
+build-web:
+	flutter build web

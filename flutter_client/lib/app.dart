@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'ui/screens/pair_screen.dart';
 import 'ui/screens/pin_screen.dart';
 import 'ui/screens/task_screen.dart';
+import 'ui/theme/theme.dart';
 import 'providers/auth_provider.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -67,13 +68,7 @@ class ClaudeRemoteApp extends ConsumerWidget {
     return MaterialApp.router(
       title: 'Claude Remote',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData.dark(useMaterial3: true).copyWith(
-        scaffoldBackgroundColor: const Color(0xFF111827),
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF3B82F6),
-          brightness: Brightness.dark,
-        ),
-      ),
+      theme: AppTheme.dark(),
       routerConfig: router,
     );
   }

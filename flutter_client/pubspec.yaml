@@ -20,7 +20,7 @@ dependencies:
   http: ^1.1.0
   
   # Crypto
-  cryptography: ^2.7.0
+  pointycastle: ^3.9.1  # Pure Dart P-256 ECDH + AES-GCM
   
   # Storage
   flutter_secure_storage: ^9.0.0
@@ -49,6 +49,14 @@ dev_dependencies:
   freezed: ^2.4.6
   json_serializable: ^6.7.1
   riverpod_generator: ^2.3.9
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icons/app_icon.png"
+  min_sdk_android: 21
+  remove_alpha_ios: true
 
 flutter:
   uses-material-design: true

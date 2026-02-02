@@ -45,7 +45,28 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<!-- Camera for QR scanning -->
 	<key>NSCameraUsageDescription</key>
 	<string>Camera is used to scan QR codes for pairing</string>
+
+	<!-- Face ID for biometric authentication (local_auth) -->
+	<key>NSFaceIDUsageDescription</key>
+	<string>Face ID is used to securely authenticate with the app</string>
+
+	<!-- Local network access for connecting to local servers -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Local network access is used to connect to your Claude server</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_http._tcp</string>
+		<string>_https._tcp</string>
+	</array>
+
+	<!-- Background modes for notifications and WebSocket -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>remote-notification</string>
+	</array>
 </dict>
 </plist>

@@ -1,0 +1,24 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg3" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2D2A26"/>
+      <stop offset="100%" style="stop-color:#1A1816"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Dark background -->
+  <rect x="0" y="0" width="1024" height="1024" rx="224" ry="224" fill="url(#bg3)"/>
+
+  <!-- Stylized "C" made of two arcs suggesting connection -->
+  <path d="M 640 288
+           A 256 256 0 1 0 640 736"
+        fill="none"
+        stroke="#D97757"
+        stroke-width="80"
+        stroke-linecap="round"/>
+
+  <!-- Signal/connection dots -->
+  <circle cx="704" cy="384" r="40" fill="#D97757"/>
+  <circle cx="768" cy="512" r="40" fill="#D97757" opacity="0.7"/>
+  <circle cx="704" cy="640" r="40" fill="#D97757"/>
+</svg>

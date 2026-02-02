@@ -1,24 +1,26 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../models/task.dart';
+import '../theme/colors.dart';
+import '../theme/spacing.dart';
 
 class TaskHeader extends StatefulWidget {
   final Task task;
   final VoidCallback onCancel;
-  
+
   const TaskHeader({
     super.key,
     required this.task,
     required this.onCancel,
   });
-  
+
   @override
   State<TaskHeader> createState() => _TaskHeaderState();
 }
 
 class _TaskHeaderState extends State<TaskHeader> {
   Timer? _timer;
-  
+
   @override
   void initState() {
     super.initState();
@@ -26,7 +28,7 @@ class _TaskHeaderState extends State<TaskHeader> {
       _startTimer();
     }
   }
-  
+
   @override
   void didUpdateWidget(TaskHeader oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -36,71 +38,71 @@ class _TaskHeaderState extends State<TaskHeader> {
       _timer?.cancel();
     }
   }
-  
+
   void _startTimer() {
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() {});
     });
   }
-  
+
   String _formatDuration(Duration d) {
     final minutes = d.inMinutes;
     final seconds = d.inSeconds % 60;
     return '${minutes}m ${seconds}s';
   }
-  
+
   @override
   Widget build(BuildContext context) {
     final task = widget.task;
-    
+
     Color statusColor;
     IconData statusIcon;
     String statusText;
-    
+
     switch (task.status) {
       case TaskStatus.running:
-        statusColor = Colors.blue;
+        statusColor = AppColors.primary;
         statusIcon = Icons.sync;
         statusText = 'Working...';
         break;
       case TaskStatus.completed:
-        statusColor = Colors.green;
+        statusColor = AppColors.success;
         statusIcon = Icons.check_circle;
         statusText = 'Complete';
         break;
       case TaskStatus.error:
-        statusColor = Colors.red;
+        statusColor = AppColors.error;
         statusIcon = Icons.error;
         statusText = 'Error';
         break;
       case TaskStatus.cancelled:
-        statusColor = Colors.orange;
+        statusColor = AppColors.warning;
         statusIcon = Icons.cancel;
         statusText = 'Cancelled';
         break;
       case TaskStatus.idle:
-        statusColor = Colors.grey;
+        statusColor = AppColors.textMuted;
         statusIcon = Icons.hourglass_empty;
         statusText = 'Idle';
         break;
     }
-    
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.grey[900],
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
+      decoration: const BoxDecoration(
+        color: AppColors.surfaceVariant,
         border: Border(
-          bottom: BorderSide(color: Colors.grey[800]!),
+          bottom: BorderSide(color: AppColors.border),
         ),
       ),
       child: Row(
         children: [
           // Status indicator
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 6),
             decoration: BoxDecoration(
               color: statusColor.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(AppRadius.lg),
               border: Border.all(color: statusColor.withOpacity(0.3)),
             ),
             child: Row(
@@ -117,7 +119,7 @@ class _TaskHeaderState extends State<TaskHeader> {
                   )
                 else
                   Icon(statusIcon, size: 14, color: statusColor),
-                const SizedBox(width: 6),
+                AppSpacing.gapHorizontalXs,
                 Text(
                   statusText,
                   style: TextStyle(
@@ -129,21 +131,21 @@ class _TaskHeaderState extends State<TaskHeader> {
               ],
             ),
           ),
-          
-          const SizedBox(width: 12),
-          
+
+          AppSpacing.gapHorizontalMd,
+
           // Elapsed time
           Text(
             _formatDuration(task.elapsed),
-            style: TextStyle(
-              color: Colors.grey[500],
+            style: const TextStyle(
+              color: AppColors.textMuted,
               fontSize: 12,
-              fontFamily: 'monospace',
+              fontFamily: 'SF Mono',
             ),
           ),
-          
+
           const Spacer(),
-          
+
           // Cancel button
           if (task.isRunning)
             TextButton.icon(
@@ -151,15 +153,15 @@ class _TaskHeaderState extends State<TaskHeader> {
               icon: const Icon(Icons.stop, size: 16),
               label: const Text('Cancel'),
               style: TextButton.styleFrom(
-                foregroundColor: Colors.red,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                foregroundColor: AppColors.error,
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
               ),
             ),
         ],
       ),
     );
   }
-  
+
   @override
   void dispose() {
     _timer?.cancel();
