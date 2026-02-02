@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../theme/colors.dart';
 
-/// A widget that renders text with clickable links
-/// Supports both markdown-style links [text](url) and bare URLs
-class RichTextContent extends StatelessWidget {
+/// A widget that renders text with markdown-like formatting
+/// Supports: **bold**, *italic*, `code`, [links](url), and bare URLs
+class RichTextContent extends StatefulWidget {
   final String text;
   final TextStyle? style;
   final bool selectable;
@@ -18,129 +18,171 @@ class RichTextContent extends StatelessWidget {
   });
 
   @override
+  State<RichTextContent> createState() => _RichTextContentState();
+}
+
+class _RichTextContentState extends State<RichTextContent> {
+  // Keep recognizers alive for the widget lifecycle
+  final List<GestureRecognizer> _recognizers = [];
+
+  @override
+  void dispose() {
+    for (final r in _recognizers) {
+      r.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final defaultStyle = style ??
+    // Clear old recognizers on rebuild
+    for (final r in _recognizers) {
+      r.dispose();
+    }
+    _recognizers.clear();
+
+    final defaultStyle = widget.style ??
         const TextStyle(
           fontSize: 14,
           height: 1.6,
           color: AppColors.textPrimary,
         );
 
-    final spans = _parseText(text, defaultStyle);
+    final spans = _parseMarkdown(widget.text, defaultStyle);
 
-    final richText = Text.rich(
-      TextSpan(children: spans),
-    );
-
-    if (selectable) {
-      return SelectionArea(
-        child: richText,
+    // Use SelectableText.rich for iOS/Android compatibility
+    if (widget.selectable) {
+      return SelectableText.rich(
+        TextSpan(children: spans),
+        style: defaultStyle,
       );
     }
 
-    return richText;
+    return Text.rich(
+      TextSpan(children: spans),
+      style: defaultStyle,
+    );
   }
 
-  List<TextSpan> _parseText(String text, TextStyle defaultStyle) {
-    final List<TextSpan> spans = [];
-    String remaining = text;
+  List<InlineSpan> _parseMarkdown(String text, TextStyle baseStyle) {
+    final List<InlineSpan> spans = [];
 
-    // Regex patterns
-    final markdownLinkPattern = RegExp(r'\[([^\]]+)\]\(([^)]+)\)');
-    final bareUrlPattern = RegExp(r'https?://[^\s<>\[\])"]+');
-
-    while (remaining.isNotEmpty) {
-      // Find the next markdown link
-      final markdownMatch = markdownLinkPattern.firstMatch(remaining);
-      // Find the next bare URL
-      final urlMatch = bareUrlPattern.firstMatch(remaining);
-
-      // Determine which comes first
-      int? markdownStart = markdownMatch?.start;
-      int? urlStart = urlMatch?.start;
-
-      // If markdown link contains the URL match, ignore the URL match
-      if (markdownMatch != null && urlMatch != null) {
-        if (urlStart! >= markdownMatch.start && urlStart < markdownMatch.end) {
-          urlStart = null;
-        }
+    // Process line by line to handle block elements
+    final lines = text.split('\n');
+    for (int i = 0; i < lines.length; i++) {
+      if (i > 0) {
+        spans.add(const TextSpan(text: '\n'));
       }
-
-      // No more links found
-      if (markdownStart == null && urlStart == null) {
-        spans.add(TextSpan(text: remaining, style: defaultStyle));
-        break;
-      }
-
-      // Markdown link comes first
-      if (markdownStart != null &&
-          (urlStart == null || markdownStart < urlStart)) {
-        // Add text before link
-        if (markdownStart > 0) {
-          spans.add(TextSpan(
-            text: remaining.substring(0, markdownStart),
-            style: defaultStyle,
-          ));
-        }
-
-        // Add the link
-        final linkText = markdownMatch!.group(1)!;
-        final linkUrl = markdownMatch.group(2)!;
-        spans.add(_buildLinkSpan(linkText, linkUrl, defaultStyle));
-
-        remaining = remaining.substring(markdownMatch.end);
-        continue;
-      }
-
-      // Bare URL comes first
-      if (urlStart != null) {
-        // Add text before URL
-        if (urlStart > 0) {
-          spans.add(TextSpan(
-            text: remaining.substring(0, urlStart),
-            style: defaultStyle,
-          ));
-        }
-
-        // Clean trailing punctuation
-        String url = urlMatch!.group(0)!;
-        final trailingPunctPattern = RegExp(r'[.,;:!?)]+$');
-        final cleanUrl = url.replaceAll(trailingPunctPattern, '');
-        final trailingPunct = url.substring(cleanUrl.length);
-
-        // Add the link
-        final displayUrl =
-            cleanUrl.length > 45 ? '${cleanUrl.substring(0, 42)}...' : cleanUrl;
-        spans.add(_buildLinkSpan(displayUrl, cleanUrl, defaultStyle));
-
-        // Add trailing punctuation as regular text
-        if (trailingPunct.isNotEmpty) {
-          spans.add(TextSpan(text: trailingPunct, style: defaultStyle));
-        }
-
-        remaining = remaining.substring(urlStart + url.length);
-        continue;
-      }
+      spans.addAll(_parseInline(lines[i], baseStyle));
     }
 
     return spans;
   }
 
-  TextSpan _buildLinkSpan(String text, String url, TextStyle defaultStyle) {
+  List<InlineSpan> _parseInline(String text, TextStyle baseStyle) {
+    final List<InlineSpan> spans = [];
+
+    // Combined regex for all inline elements
+    // Order matters: longer patterns first
+    final pattern = RegExp(
+      r'(\*\*|__)(.+?)\1|'           // Bold: **text** or __text__
+      r'(\*|_)([^*_]+?)\3|'          // Italic: *text* or _text_
+      r'`([^`]+)`|'                   // Inline code: `code`
+      r'\[([^\]]+)\]\(([^)]+)\)|'    // Markdown link: [text](url)
+      r'(https?://[^\s<>\[\])"\']+)', // Bare URL
+    );
+
+    int lastEnd = 0;
+
+    for (final match in pattern.allMatches(text)) {
+      // Add text before this match
+      if (match.start > lastEnd) {
+        spans.add(TextSpan(
+          text: text.substring(lastEnd, match.start),
+          style: baseStyle,
+        ));
+      }
+
+      // Determine which group matched
+      if (match.group(2) != null) {
+        // Bold
+        spans.add(TextSpan(
+          text: match.group(2),
+          style: baseStyle.copyWith(fontWeight: FontWeight.bold),
+        ));
+      } else if (match.group(4) != null) {
+        // Italic
+        spans.add(TextSpan(
+          text: match.group(4),
+          style: baseStyle.copyWith(fontStyle: FontStyle.italic),
+        ));
+      } else if (match.group(5) != null) {
+        // Inline code
+        spans.add(TextSpan(
+          text: match.group(5),
+          style: baseStyle.copyWith(
+            fontFamily: 'monospace',
+            backgroundColor: AppColors.surfaceVariant,
+            color: AppColors.info,
+          ),
+        ));
+      } else if (match.group(6) != null && match.group(7) != null) {
+        // Markdown link
+        spans.add(_buildLinkSpan(match.group(6)!, match.group(7)!, baseStyle));
+      } else if (match.group(8) != null) {
+        // Bare URL
+        final url = match.group(8)!;
+        // Clean trailing punctuation
+        final cleanUrl = url.replaceAll(RegExp(r'[.,;:!?)]+$'), '');
+        final trailing = url.substring(cleanUrl.length);
+
+        final displayUrl = cleanUrl.length > 40
+            ? '${cleanUrl.substring(0, 37)}...'
+            : cleanUrl;
+        spans.add(_buildLinkSpan(displayUrl, cleanUrl, baseStyle));
+
+        if (trailing.isNotEmpty) {
+          spans.add(TextSpan(text: trailing, style: baseStyle));
+        }
+      }
+
+      lastEnd = match.end;
+    }
+
+    // Add remaining text
+    if (lastEnd < text.length) {
+      spans.add(TextSpan(
+        text: text.substring(lastEnd),
+        style: baseStyle,
+      ));
+    }
+
+    // If no spans, return the original text
+    if (spans.isEmpty) {
+      spans.add(TextSpan(text: text, style: baseStyle));
+    }
+
+    return spans;
+  }
+
+  TextSpan _buildLinkSpan(String text, String url, TextStyle baseStyle) {
+    final recognizer = TapGestureRecognizer()
+      ..onTap = () async {
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
+      };
+    _recognizers.add(recognizer);
+
     return TextSpan(
       text: '$text ↗',
-      style: defaultStyle.copyWith(
+      style: baseStyle.copyWith(
         color: AppColors.link,
         decoration: TextDecoration.underline,
         decorationColor: AppColors.link.withOpacity(0.5),
       ),
-      recognizer: TapGestureRecognizer()
-        ..onTap = () async {
-          final uri = Uri.parse(url);
-          if (await canLaunchUrl(uri)) {
-            await launchUrl(uri, mode: LaunchMode.externalApplication);
-          }
-        },
+      recognizer: recognizer,
     );
   }
 }
