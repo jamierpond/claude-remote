@@ -12,7 +12,7 @@ export function spawnClaude(
   signal?: AbortSignal,
   sessionId?: string | null
 ): ChildProcess {
-  const args = ['--output-format', 'stream-json', '--verbose'];
+  const args = ['--print', '--output-format', 'stream-json', '--verbose'];
 
   if (sessionId) {
     // Resume existing session
@@ -20,7 +20,7 @@ export function spawnClaude(
     console.log('[claude] Resuming session:', sessionId);
   } else {
     // New session
-    args.push('--print', '-p', message);
+    args.push('-p', message);
     console.log('[claude] Starting new session');
   }
 
@@ -68,6 +68,7 @@ export function spawnClaude(
 
   let buffer = '';
   let sentAnyText = false;
+  let sentDone = false;
 
   const processLine = (line: string) => {
     if (!line.trim()) return;
@@ -142,14 +143,17 @@ export function spawnClaude(
         }
       }
     } else if (data.type === 'result') {
-      console.log('[claude] Result received, sentAnyText:', sentAnyText);
+      console.log('[claude] Result received, sentAnyText:', sentAnyText, 'sentDone:', sentDone);
       // Only send result text if we haven't sent any text blocks yet
       // (avoids duplication for simple responses)
       if (!sentAnyText && data.result && typeof data.result === 'string') {
         console.log('[claude] Sending final result text (no prior text sent)');
         onEvent({ type: 'text', text: data.result });
       }
-      onEvent({ type: 'done' });
+      if (!sentDone) {
+        sentDone = true;
+        onEvent({ type: 'done' });
+      }
     }
   };
 
@@ -173,7 +177,7 @@ export function spawnClaude(
 
   proc.on('close', (code, signal) => {
     clearTimeout(timeout);
-    console.log('[claude] CLOSED - code:', code, 'signal:', signal);
+    console.log('[claude] CLOSED - code:', code, 'signal:', signal, 'sentDone:', sentDone);
     if (buffer.trim()) {
       processLine(buffer);
     }
@@ -182,7 +186,10 @@ export function spawnClaude(
       console.error(err);
       onEvent({ type: 'error', text: err });
     }
-    onEvent({ type: 'done' });
+    if (!sentDone) {
+      sentDone = true;
+      onEvent({ type: 'done' });
+    }
   });
 
   proc.on('error', (err) => {

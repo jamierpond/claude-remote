@@ -346,8 +346,11 @@ async function main() {
         console.log('Using Claude session:', sessionId || 'new session');
 
         spawnClaude(userText, (event: ClaudeEvent) => {
+          console.log('[ws] Claude event:', event.type, event.sessionId ? `sessionId=${event.sessionId}` : '');
+
           // Don't forward session_init to client, just save it
           if (event.type === 'session_init' && event.sessionId) {
+            console.log('[ws] Saving session ID:', event.sessionId);
             saveClaudeSessionId(event.sessionId);
             return;
           }
