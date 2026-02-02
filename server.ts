@@ -6,6 +6,7 @@ import { parse } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
 import { randomBytes } from 'crypto';
 import { readFileSync, existsSync, appendFileSync, writeFileSync } from 'fs';
+import { execSync } from 'child_process';
 import { homedir } from 'os';
 import qrcode from 'qrcode-terminal';
 import { join } from 'path';
@@ -322,6 +323,63 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         activity: partialResponse.activity,
       } : null,
     });
+  }
+
+  // API: Get git status for a project
+  if (pathname?.startsWith('/api/projects/') && pathname.endsWith('/git') && method === 'GET') {
+    const projectId = decodeURIComponent(pathname.split('/api/projects/')[1].replace('/git', ''));
+    const project = getProject(projectId);
+    if (!project) {
+      return json(res, { error: 'Project not found' }, 404);
+    }
+
+    try {
+      // Get current branch
+      const branch = execSync('git rev-parse --abbrev-ref HEAD', {
+        cwd: project.path,
+        encoding: 'utf-8',
+        timeout: 5000,
+      }).trim();
+
+      // Check if working directory is dirty
+      const status = execSync('git status --porcelain', {
+        cwd: project.path,
+        encoding: 'utf-8',
+        timeout: 5000,
+      }).trim();
+      const isDirty = status.length > 0;
+
+      // Count changed files
+      const changedFiles = status ? status.split('\n').length : 0;
+
+      // Get ahead/behind counts (may fail if no upstream)
+      let ahead = 0;
+      let behind = 0;
+      try {
+        const counts = execSync('git rev-list --left-right --count HEAD...@{upstream}', {
+          cwd: project.path,
+          encoding: 'utf-8',
+          timeout: 5000,
+        }).trim().split('\t');
+        ahead = parseInt(counts[0], 10) || 0;
+        behind = parseInt(counts[1], 10) || 0;
+      } catch {
+        // No upstream configured, ignore
+      }
+
+      console.log(`[api] Git status for ${projectId}: ${branch} ${isDirty ? '(dirty)' : '(clean)'}`);
+      return json(res, {
+        branch,
+        isDirty,
+        changedFiles,
+        ahead,
+        behind,
+      });
+    } catch (err) {
+      // Not a git repo or git not available
+      console.log(`[api] Git status failed for ${projectId}:`, err);
+      return json(res, { error: 'Not a git repository' }, 400);
+    }
   }
 
   // API: Pair GET - get server public key
