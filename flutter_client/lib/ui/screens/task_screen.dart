@@ -11,7 +11,7 @@ import '../widgets/project_picker.dart';
 import '../widgets/git_status_badge.dart';
 import '../widgets/task_header.dart';
 import '../widgets/thinking_panel.dart';
-import '../widgets/activity_feed.dart';
+import '../widgets/tool_stack.dart';
 import '../widgets/output_chunks.dart';
 
 class TaskScreen extends ConsumerStatefulWidget {
@@ -137,6 +137,14 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
                       ? _buildEmptyState()
                       : _buildTaskContent(activeTaskState),
                 ),
+
+                // Tool Stack (separate panel for live tool activity)
+                if (activeTaskState.currentTask != null &&
+                    activeTaskState.currentTask!.activities.isNotEmpty)
+                  ToolStack(
+                    activities: activeTaskState.currentTask!.activities,
+                    isLive: activeTaskState.isStreaming,
+                  ),
 
                 // Input area
                 _buildInputArea(isStreaming),
@@ -281,7 +289,7 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
           _buildPromptBubble(task.prompt),
           AppSpacing.gapVerticalLg,
 
-          // Response card
+          // Response card (text/thinking only - tools shown in ToolStack)
           Container(
             decoration: BoxDecoration(
               color: AppColors.surface,
@@ -301,16 +309,6 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
                     child: ThinkingPanel(text: task.thinking),
                   ),
 
-                // Activity
-                if (task.activities.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
-                    child: ActivityFeed(
-                      activities: task.activities,
-                      isLive: state.isStreaming,
-                    ),
-                  ),
-
                 // Output
                 if (task.outputChunks.isNotEmpty)
                   Padding(
@@ -318,8 +316,8 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
                     child: OutputChunks(chunks: task.outputChunks),
                   ),
 
-                // Loading
-                if (task.outputChunks.isEmpty && task.activities.isEmpty && task.thinking.isEmpty)
+                // Loading (only if no content yet)
+                if (task.outputChunks.isEmpty && task.thinking.isEmpty)
                   const Padding(
                     padding: EdgeInsets.all(AppSpacing.xxl),
                     child: Center(
@@ -331,7 +329,7 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           ),
                           AppSpacing.gapVerticalMd,
-                          Text('Starting...', style: TextStyle(color: AppColors.textMuted)),
+                          Text('Working...', style: TextStyle(color: AppColors.textMuted)),
                         ],
                       ),
                     ),
