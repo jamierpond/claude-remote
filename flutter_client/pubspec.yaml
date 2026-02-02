@@ -32,7 +32,7 @@ dependencies:
   
   # Native features
   local_auth: ^2.1.8
-  flutter_local_notifications: ^16.3.0
+  flutter_local_notifications: ^18.0.0
   mobile_scanner: ^4.0.0  # QR scanning
   
   # Utils
