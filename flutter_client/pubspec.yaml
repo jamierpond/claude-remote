@@ -1,0 +1,54 @@
+name: claude_remote
+description: Mobile client for Claude Remote - async task execution with E2E encryption
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+  flutter: '>=3.16.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # State management
+  flutter_riverpod: ^2.4.9
+  riverpod_annotation: ^2.3.3
+  
+  # Networking
+  web_socket_channel: ^2.4.0
+  http: ^1.1.0
+  
+  # Crypto
+  cryptography: ^2.7.0
+  
+  # Storage
+  flutter_secure_storage: ^9.0.0
+  shared_preferences: ^2.2.2
+  
+  # UI
+  go_router: ^13.0.0
+  google_fonts: ^6.1.0
+  
+  # Native features
+  local_auth: ^2.1.8
+  flutter_local_notifications: ^16.3.0
+  mobile_scanner: ^4.0.0  # QR scanning
+  
+  # Utils
+  intl: ^0.18.1
+  equatable: ^2.0.5
+  freezed_annotation: ^2.4.1
+  json_annotation: ^4.8.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+  build_runner: ^2.4.7
+  freezed: ^2.4.6
+  json_serializable: ^6.7.1
+  riverpod_generator: ^2.3.9
+
+flutter:
+  uses-material-design: true
