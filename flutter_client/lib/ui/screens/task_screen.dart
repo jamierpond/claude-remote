@@ -4,6 +4,8 @@ import '../../models/task.dart';
 import '../../providers/task_provider.dart';
 import '../../providers/project_provider.dart';
 import '../../providers/auth_provider.dart';
+import '../theme/colors.dart';
+import '../theme/spacing.dart';
 import '../widgets/project_tabs.dart';
 import '../widgets/project_picker.dart';
 import '../widgets/git_status_badge.dart';
@@ -88,7 +90,7 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error: $e'),
-            backgroundColor: Colors.red,
+            backgroundColor: AppColors.error,
           ),
         );
       }
@@ -146,7 +148,7 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
               GestureDetector(
                 onTap: () => setState(() => _showProjectPicker = false),
                 child: Container(
-                  color: Colors.black54,
+                  color: AppColors.background.withOpacity(0.8),
                   child: Align(
                     alignment: Alignment.bottomCenter,
                     child: GestureDetector(
@@ -170,11 +172,11 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
     final gitStatus = projectState.activeGitStatus;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF111827),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
+      decoration: const BoxDecoration(
+        color: AppColors.background,
         border: Border(
-          bottom: BorderSide(color: Colors.grey[800]!),
+          bottom: BorderSide(color: AppColors.border),
         ),
       ),
       child: Row(
@@ -186,6 +188,7 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
               style: const TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
               ),
               overflow: TextOverflow.ellipsis,
             ),
@@ -194,7 +197,7 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
           // Git status
           if (gitStatus != null)
             Padding(
-              padding: const EdgeInsets.only(left: 12),
+              padding: const EdgeInsets.only(left: AppSpacing.md),
               child: GitStatusBadge(
                 status: gitStatus,
                 onRefresh: () =>
@@ -207,7 +210,7 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
             onPressed: () {
               // TODO: implement reset
             },
-            icon: Icon(Icons.refresh, color: Colors.grey[500], size: 20),
+            icon: const Icon(Icons.refresh, color: AppColors.textSecondary, size: 20),
             tooltip: 'Reset',
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
@@ -223,34 +226,32 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(AppSpacing.xl),
             decoration: BoxDecoration(
-              color: Colors.grey[800]?.withOpacity(0.5),
-              borderRadius: BorderRadius.circular(16),
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              border: Border.all(color: AppColors.border),
             ),
             child: Column(
               children: [
-                Icon(
+                const Icon(
                   Icons.folder_open,
                   size: 48,
-                  color: Colors.grey[600],
+                  color: AppColors.textMuted,
                 ),
-                const SizedBox(height: 16),
-                Text(
+                AppSpacing.gapVerticalLg,
+                const Text(
                   'Select a project to start',
                   style: TextStyle(
                     fontSize: 16,
-                    color: Colors.grey[500],
+                    color: AppColors.textSecondary,
                   ),
                 ),
-                const SizedBox(height: 16),
+                AppSpacing.gapVerticalLg,
                 ElevatedButton.icon(
                   onPressed: () => setState(() => _showProjectPicker = true),
                   icon: const Icon(Icons.add),
                   label: const Text('Open Project'),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  ),
                 ),
               ],
             ),
@@ -266,26 +267,26 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
 
     return ListView(
       controller: _scrollController,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppSpacing.lg),
       children: [
         // Message history
         for (final msg in messages) ...[
           _buildMessageBubble(msg),
-          const SizedBox(height: 12),
+          AppSpacing.gapVerticalMd,
         ],
 
         // Current task (if streaming)
         if (task != null && state.isStreaming) ...[
           // Prompt
           _buildPromptBubble(task.prompt),
-          const SizedBox(height: 16),
+          AppSpacing.gapVerticalLg,
 
           // Response card
           Container(
             decoration: BoxDecoration(
-              color: Colors.grey[800]?.withOpacity(0.4),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.grey[700]!),
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              border: Border.all(color: AppColors.border),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -296,14 +297,14 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
                 // Thinking
                 if (task.thinking.isNotEmpty)
                   Padding(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(AppSpacing.lg),
                     child: ThinkingPanel(text: task.thinking),
                   ),
 
                 // Activity
                 if (task.activities.isNotEmpty)
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
                     child: ActivityFeed(
                       activities: task.activities,
                       isLive: state.isStreaming,
@@ -313,14 +314,14 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
                 // Output
                 if (task.outputChunks.isNotEmpty)
                   Padding(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(AppSpacing.lg),
                     child: OutputChunks(chunks: task.outputChunks),
                   ),
 
                 // Loading
                 if (task.outputChunks.isEmpty && task.activities.isEmpty && task.thinking.isEmpty)
                   const Padding(
-                    padding: EdgeInsets.all(32),
+                    padding: EdgeInsets.all(AppSpacing.xxl),
                     child: Center(
                       child: Column(
                         children: [
@@ -329,8 +330,8 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
                             height: 24,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           ),
-                          SizedBox(height: 12),
-                          Text('Starting...', style: TextStyle(color: Colors.grey)),
+                          AppSpacing.gapVerticalMd,
+                          Text('Starting...', style: TextStyle(color: AppColors.textMuted)),
                         ],
                       ),
                     ),
@@ -342,16 +343,16 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
 
         // No content state
         if (messages.isEmpty && task == null)
-          Center(
+          const Center(
             child: Padding(
-              padding: const EdgeInsets.all(48),
+              padding: EdgeInsets.all(48),
               child: Column(
                 children: [
-                  Icon(Icons.chat_bubble_outline, size: 48, color: Colors.grey[700]),
-                  const SizedBox(height: 16),
+                  Icon(Icons.chat_bubble_outline, size: 48, color: AppColors.textMuted),
+                  AppSpacing.gapVerticalLg,
                   Text(
                     'Start a conversation',
-                    style: TextStyle(color: Colors.grey[600]),
+                    style: TextStyle(color: AppColors.textSecondary),
                   ),
                 ],
               ),
@@ -368,14 +369,14 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
         constraints: BoxConstraints(
           maxWidth: MediaQuery.of(context).size.width * 0.85,
         ),
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppSpacing.lg),
         decoration: BoxDecoration(
-          color: Colors.blue[700],
-          borderRadius: BorderRadius.circular(16),
+          color: AppColors.primary,
+          borderRadius: BorderRadius.circular(AppRadius.lg),
         ),
         child: Text(
           prompt,
-          style: const TextStyle(fontSize: 15),
+          style: const TextStyle(fontSize: 15, color: AppColors.textOnPrimary),
         ),
       ),
     );
@@ -392,31 +393,31 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
             constraints: BoxConstraints(
               maxWidth: MediaQuery.of(context).size.width * 0.85,
             ),
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(AppSpacing.lg),
             decoration: BoxDecoration(
-              color: Colors.blue[700],
-              borderRadius: BorderRadius.circular(16),
+              color: AppColors.primary,
+              borderRadius: BorderRadius.circular(AppRadius.lg),
             ),
             child: Text(
               msg.prompt,
-              style: const TextStyle(fontSize: 15),
+              style: const TextStyle(fontSize: 15, color: AppColors.textOnPrimary),
             ),
           ),
         ),
 
         if (msg.fullOutput.isNotEmpty) ...[
-          const SizedBox(height: 12),
+          AppSpacing.gapVerticalMd,
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(AppSpacing.lg),
             decoration: BoxDecoration(
-              color: Colors.grey[800]?.withOpacity(0.4),
-              borderRadius: BorderRadius.circular(12),
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(AppRadius.md),
             ),
             child: Text(
               msg.fullOutput,
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 14,
-                color: Colors.grey[200],
+                color: AppColors.textPrimary,
               ),
             ),
           ),
@@ -428,15 +429,15 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
   Widget _buildInputArea(bool isStreaming) {
     return Container(
       padding: EdgeInsets.only(
-        left: 16,
-        right: 16,
-        top: 12,
-        bottom: MediaQuery.of(context).padding.bottom + 12,
+        left: AppSpacing.lg,
+        right: AppSpacing.lg,
+        top: AppSpacing.md,
+        bottom: MediaQuery.of(context).padding.bottom + AppSpacing.md,
       ),
-      decoration: BoxDecoration(
-        color: Colors.grey[900],
+      decoration: const BoxDecoration(
+        color: AppColors.surface,
         border: Border(
-          top: BorderSide(color: Colors.grey[800]!),
+          top: BorderSide(color: AppColors.border),
         ),
       ),
       child: Row(
@@ -447,24 +448,26 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
               enabled: !isStreaming,
               maxLines: null,
               textCapitalization: TextCapitalization.sentences,
+              style: const TextStyle(color: AppColors.textPrimary),
               decoration: InputDecoration(
                 hintText: isStreaming ? 'Working...' : 'Enter a task...',
+                hintStyle: const TextStyle(color: AppColors.textMuted),
                 filled: true,
-                fillColor: Colors.grey[850],
+                fillColor: AppColors.surfaceVariant,
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(24),
+                  borderRadius: BorderRadius.circular(AppRadius.xl),
                   borderSide: BorderSide.none,
                 ),
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 20,
-                  vertical: 12,
+                  vertical: AppSpacing.md,
                 ),
               ),
               onChanged: (_) => _saveState(),
               onSubmitted: (_) => _sendTask(),
             ),
           ),
-          const SizedBox(width: 12),
+          AppSpacing.gapHorizontalMd,
           _buildActionButton(isStreaming),
         ],
       ),

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import '../models/project.dart';
 import 'auth_provider.dart';
+import 'task_provider.dart';
 
 // State for project management
 class ProjectState {
@@ -54,13 +55,20 @@ class ProjectState {
 
 final projectProvider = StateNotifierProvider<ProjectNotifier, ProjectState>((ref) {
   final authState = ref.watch(authStateProvider);
-  return ProjectNotifier(serverUrl: authState.serverUrl);
+  return ProjectNotifier(
+    serverUrl: authState.serverUrl,
+    onProjectOpened: (projectId) {
+      // Fetch conversation history when a project is opened
+      ref.read(taskManagerProvider.notifier).fetchConversationHistory(projectId);
+    },
+  );
 });
 
 class ProjectNotifier extends StateNotifier<ProjectState> {
   final String? serverUrl;
+  final void Function(String projectId)? onProjectOpened;
 
-  ProjectNotifier({this.serverUrl}) : super(const ProjectState());
+  ProjectNotifier({this.serverUrl, this.onProjectOpened}) : super(const ProjectState());
 
   Future<void> fetchProjects() async {
     if (serverUrl == null) {
@@ -105,6 +113,8 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
       );
       // Fetch git status for new project
       fetchGitStatus(project.id);
+      // Fetch conversation history for new project
+      onProjectOpened?.call(project.id);
     } else {
       state = state.copyWith(activeProjectId: project.id);
     }

@@ -32,10 +32,14 @@ class _PinScreenState extends ConsumerState<PinScreen> {
       setState(() {
         _canUseBiometrics = canCheck && isSupported;
       });
-      
-      // Auto-trigger biometrics if available
+
+      // Auto-trigger biometrics if available AND we have a stored PIN
       if (_canUseBiometrics) {
-        _authenticateWithBiometrics();
+        final storage = ref.read(storageProvider);
+        final hasStoredPin = await storage.getPin() != null;
+        if (hasStoredPin) {
+          _authenticateWithBiometrics();
+        }
       }
     } catch (e) {
       // Biometrics not available
@@ -43,36 +47,45 @@ class _PinScreenState extends ConsumerState<PinScreen> {
   }
   
   Future<void> _authenticateWithBiometrics() async {
+    // Check if we have a stored PIN first
+    final storage = ref.read(storageProvider);
+    final storedPin = await storage.getPin();
+
+    if (storedPin == null) {
+      setState(() {
+        _error = 'Enter PIN first to enable biometric unlock';
+      });
+      return;
+    }
+
     setState(() {
       _isAuthenticating = true;
       _error = null;
     });
-    
+
     try {
       final authenticated = await _localAuth.authenticate(
-        localizedReason: 'Authenticate to access Claude Remote',
+        localizedReason: 'Unlock Claude Remote',
         options: const AuthenticationOptions(
           stickyAuth: true,
           biometricOnly: true,
         ),
       );
-      
+
       if (authenticated) {
-        // Use stored PIN or a special biometric token
-        // For now, we still need the actual PIN for server auth
-        // This would require server-side changes to support biometric tokens
-        setState(() {
-          _error = 'Biometric auth verified, please enter PIN for server';
-        });
+        // Biometrics verified - use stored PIN to authenticate with server
+        await ref.read(authStateProvider.notifier).authenticate(storedPin);
       }
     } on PlatformException catch (e) {
       setState(() {
         _error = 'Biometric auth failed: ${e.message}';
       });
     } finally {
-      setState(() {
-        _isAuthenticating = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isAuthenticating = false;
+        });
+      }
     }
   }
   
@@ -82,23 +95,27 @@ class _PinScreenState extends ConsumerState<PinScreen> {
       setState(() => _error = 'PIN must be at least 4 digits');
       return;
     }
-    
+
     setState(() {
       _isAuthenticating = true;
       _error = null;
     });
-    
+
     try {
       await ref.read(authStateProvider.notifier).authenticate(pin);
+      // Save PIN for future biometric unlock
+      await ref.read(storageProvider).savePin(pin);
       // Navigation is handled by router redirect
     } catch (e) {
       setState(() {
         _error = e.toString();
       });
     } finally {
-      setState(() {
-        _isAuthenticating = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isAuthenticating = false;
+        });
+      }
     }
   }
   

@@ -43,6 +43,19 @@ class StorageService {
   Future<void> clearSecure() async {
     await _secureStorage.deleteAll();
   }
+
+  // Store PIN securely for biometric unlock
+  Future<void> savePin(String pin) async {
+    await _secureStorage.write(key: 'auth_pin', value: pin);
+  }
+
+  Future<String?> getPin() async {
+    return await _secureStorage.read(key: 'auth_pin');
+  }
+
+  Future<void> clearPin() async {
+    await _secureStorage.delete(key: 'auth_pin');
+  }
   
   // === Regular Storage (UI state) ===
   

@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
 import '../models/task.dart';
 import '../models/tool_activity.dart';
 import '../core/websocket.dart';
@@ -101,6 +104,7 @@ final taskManagerProvider = StateNotifierProvider<TaskManagerNotifier, TaskManag
   return TaskManagerNotifier(
     webSocket: authNotifier.webSocket,
     isAuthenticated: authState.isAuthenticated,
+    serverUrl: authState.serverUrl,
   );
 });
 
@@ -119,11 +123,13 @@ final activeTaskStateProvider = Provider<ProjectTaskState>((ref) {
 class TaskManagerNotifier extends StateNotifier<TaskManagerState> {
   final WebSocketManager? webSocket;
   final bool isAuthenticated;
+  final String? serverUrl;
   StreamSubscription? _subscription;
 
   TaskManagerNotifier({
     required this.webSocket,
     required this.isAuthenticated,
+    this.serverUrl,
   }) : super(const TaskManagerState()) {
     if (webSocket != null && isAuthenticated) {
       _subscribe();
@@ -347,6 +353,89 @@ class TaskManagerNotifier extends StateNotifier<TaskManagerState> {
         isStreaming: false,
       );
     });
+  }
+
+  /// Fetches conversation history for a project from the server
+  Future<void> fetchConversationHistory(String projectId) async {
+    if (serverUrl == null) {
+      debugPrint('[HISTORY] No serverUrl, cannot fetch history');
+      return;
+    }
+
+    debugPrint('[HISTORY] Fetching conversation history for: $projectId');
+
+    try {
+      final response = await http.get(
+        Uri.parse('$serverUrl/api/projects/${Uri.encodeComponent(projectId)}/conversation'),
+      );
+
+      if (response.statusCode != 200) {
+        debugPrint('[HISTORY] Failed to fetch: ${response.statusCode}');
+        return;
+      }
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final messagesList = (data['messages'] as List<dynamic>?) ?? [];
+
+      debugPrint('[HISTORY] Loaded ${messagesList.length} messages for $projectId');
+
+      if (messagesList.isEmpty) return;
+
+      // Parse messages into Tasks
+      // The API returns alternating user/assistant messages
+      // We combine each user message with its following assistant response into a Task
+      final List<Task> tasks = [];
+
+      for (int i = 0; i < messagesList.length; i++) {
+        final msg = messagesList[i] as Map<String, dynamic>;
+        final role = msg['role'] as String?;
+
+        if (role == 'user') {
+          final prompt = msg['content'] as String? ?? '';
+
+          // Look for the next assistant message
+          String content = '';
+          String thinking = '';
+          DateTime? completedAt;
+          DateTime startedAt = DateTime.now();
+
+          if (i + 1 < messagesList.length) {
+            final nextMsg = messagesList[i + 1] as Map<String, dynamic>;
+            if (nextMsg['role'] == 'assistant') {
+              content = nextMsg['content'] as String? ?? '';
+              thinking = nextMsg['thinking'] as String? ?? '';
+              if (nextMsg['startedAt'] != null) {
+                startedAt = DateTime.tryParse(nextMsg['startedAt'] as String) ?? startedAt;
+              }
+              if (nextMsg['completedAt'] != null) {
+                completedAt = DateTime.tryParse(nextMsg['completedAt'] as String);
+              }
+              i++; // Skip the assistant message in next iteration
+            }
+          }
+
+          tasks.add(Task(
+            prompt: prompt,
+            status: TaskStatus.completed,
+            startedAt: startedAt,
+            completedAt: completedAt,
+            thinking: thinking,
+            outputChunks: content.isNotEmpty
+                ? [OutputChunk(text: content, timestamp: completedAt ?? DateTime.now())]
+                : [],
+          ));
+        }
+      }
+
+      debugPrint('[HISTORY] Parsed ${tasks.length} tasks for $projectId');
+
+      // Update state with loaded messages
+      state = state.updateProject(projectId, (s) => s.copyWith(
+        messages: tasks,
+      ));
+    } catch (e) {
+      debugPrint('[HISTORY] Error fetching history: $e');
+    }
   }
 
   @override
