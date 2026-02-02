@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import ProjectTabs, { type Project } from '../components/ProjectTabs';
 import ProjectPicker from '../components/ProjectPicker';
 import StreamingResponse, { type ToolActivity } from '../components/StreamingResponse';
+import ToolStack from '../components/ToolStack';
 
 
 interface Props {
@@ -1210,6 +1211,14 @@ export default function Chat({ token }: Props) {
 
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Tools stack - shows during streaming */}
+      {isStreaming && currentActivity.length > 0 && (
+        <ToolStack
+          activity={currentActivity}
+          isStreaming={isStreaming}
+        />
+      )}
 
       {/* Input area */}
       <div className="border-t border-gray-700 bg-gray-900 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4 sm:py-4">
