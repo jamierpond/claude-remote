@@ -1,24 +1,24 @@
-.PHONY: dev dev-server dev-client dev-flutter build start logs-server logs-client install clean reload kill restart
+.PHONY: dev dev-server dev-client dev-vite dev-flutter-client build start logs-server logs-client install clean reload kill restart
 
 # Install all dependencies
 install:
 	pnpm install
 	cd flutter_client && flutter pub get
 
-# Run both server and React web client (with hot reload)
-# Server: tsx --watch auto-restarts on .ts file changes
-# Client: Vite HMR auto-updates on save
-dev:
-	pnpm dev
-
 # Run server + Flutter web client (with hot reload)
 # Server: tsx --watch auto-restarts on .ts file changes
-# Flutter: flutter run -d chrome with hot reload
-dev-flutter:
+# Flutter: flutter run -d web-server with hot reload on port 3000
+dev:
 	@mkdir -p logs
 	@echo "Starting server and Flutter web client..."
 	@(tsx --watch server.ts 2>&1 | tee logs/server.log) & \
-	(cd flutter_client && flutter run -d chrome 2>&1 | tee ../logs/flutter.log)
+	(cd flutter_client && flutter run -d web-server --web-port=3000 2>&1 | tee ../logs/flutter.log)
+
+# Run both server and React web client (with hot reload)
+# Server: tsx --watch auto-restarts on .ts file changes
+# Client: Vite HMR auto-updates on save
+dev-vite:
+	pnpm dev
 
 # Run server only (with watch mode)
 dev-server:
