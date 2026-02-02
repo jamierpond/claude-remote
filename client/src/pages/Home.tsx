@@ -4,10 +4,15 @@ interface Props {
   onNavigate: (route: 'home' | 'chat' | 'pair') => void;
 }
 
+interface DeviceInfo {
+  id: string;
+  createdAt: string;
+}
+
 interface Status {
   paired: boolean;
-  deviceId: string | null;
-  pairedAt: string | null;
+  devices: DeviceInfo[];
+  deviceCount: number;
   pairingUrl: string | null;
 }
 
@@ -84,36 +89,18 @@ export default function Home({ onNavigate }: Props) {
     }
   };
 
-  if (status.paired) {
-    const hasBrowserCredentials = !!localStorage.getItem('claude-remote-paired');
+  const hasBrowserCredentials = !!localStorage.getItem('claude-remote-paired');
+  const myDeviceId = localStorage.getItem('claude-remote-device-id');
 
-    if (!hasBrowserCredentials) {
-      return (
-        <main className="min-h-screen flex flex-col items-center justify-center bg-gray-900 text-white p-4">
-          <div className="text-center">
-            <div className="text-6xl mb-4">!</div>
-            <h1 className="text-2xl font-bold mb-2">Crypto Mismatch</h1>
-            <p className="text-gray-400 mb-4">
-              Server is paired but this browser has no/wrong credentials.
-            </p>
-            <button
-              onClick={handleForceRepair}
-              disabled={unpairing}
-              className="px-6 py-3 bg-red-600 rounded-lg font-semibold hover:bg-red-700 transition-colors disabled:opacity-50"
-            >
-              {unpairing ? 'Resetting...' : 'Reset & Re-pair'}
-            </button>
-          </div>
-        </main>
-      );
-    }
-
+  // This browser is paired
+  if (hasBrowserCredentials && myDeviceId) {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center bg-gray-900 text-white p-4">
         <div className="text-center">
           <h1 className="text-2xl font-bold mb-2">Claude Remote</h1>
           <p className="text-gray-400 mb-4">Device paired and ready.</p>
-          <p className="text-sm text-gray-500 mb-6">ID: {status.deviceId}</p>
+          <p className="text-sm text-gray-500 mb-2">This device: {myDeviceId}</p>
+          <p className="text-sm text-gray-500 mb-6">Total devices: {status.deviceCount}</p>
           <div className="flex flex-col gap-3">
             <a
               href="/chat"
@@ -121,14 +108,46 @@ export default function Home({ onNavigate }: Props) {
             >
               Open Chat
             </a>
+            {status.pairingUrl && (
+              <a
+                href={status.pairingUrl}
+                className="px-6 py-3 bg-green-600 rounded-lg font-semibold hover:bg-green-700 transition-colors text-center"
+              >
+                Pair Another Device
+              </a>
+            )}
             <button
               onClick={handleForceRepair}
               disabled={unpairing}
               className="px-6 py-3 bg-gray-700 rounded-lg font-semibold hover:bg-gray-600 transition-colors disabled:opacity-50"
             >
-              {unpairing ? 'Resetting...' : 'Reset & Re-pair'}
+              {unpairing ? 'Resetting...' : 'Unpair All & Reset'}
             </button>
           </div>
+        </div>
+      </main>
+    );
+  }
+
+  // Server has devices but this browser isn't paired - allow pairing
+  if (status.paired && !hasBrowserCredentials) {
+    return (
+      <main className="min-h-screen flex flex-col items-center justify-center bg-gray-900 text-white p-4">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold mb-2">Claude Remote</h1>
+          <p className="text-gray-400 mb-4">
+            {status.deviceCount} device(s) paired. This browser is not paired.
+          </p>
+          {status.pairingUrl ? (
+            <a
+              href={status.pairingUrl}
+              className="px-6 py-3 bg-blue-600 rounded-lg font-semibold hover:bg-blue-700 transition-colors inline-block"
+            >
+              Pair This Device
+            </a>
+          ) : (
+            <p className="text-red-400">No pairing URL available - restart server</p>
+          )}
         </div>
       </main>
     );

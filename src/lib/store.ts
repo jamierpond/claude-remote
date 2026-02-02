@@ -1,9 +1,11 @@
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'fs';
-import { join } from 'path';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'fs';
+import { join, basename } from 'path';
 import { homedir } from 'os';
 import argon2 from 'argon2';
 
 const CONFIG_DIR = join(homedir(), '.config', 'claude-remote');
+const PROJECTS_DIR = join(CONFIG_DIR, 'projects');
+const DEFAULT_PROJECTS_BASE = join(homedir(), 'projects');
 
 export interface Device {
   id: string;
@@ -22,14 +24,49 @@ export interface Config {
   pinHash: string | null;
 }
 
+export interface ToolActivity {
+  type: 'tool_use' | 'tool_result';
+  tool: string;
+  input?: Record<string, unknown>;
+  output?: string;
+  error?: string;
+  timestamp: number;
+}
+
+export interface OutputChunk {
+  text: string;
+  timestamp: number;
+  afterTool?: string;  // which tool triggered this chunk (if any)
+}
+
 export interface Message {
   role: 'user' | 'assistant';
-  content: string;
+  content: string;           // full text (for backwards compat and search)
+  task?: string;             // user's original prompt (for assistant messages)
+  chunks?: OutputChunk[];    // structured output chunks
   thinking?: string;
-  timestamp: string;
+  activity?: ToolActivity[];
+  startedAt?: string;        // when task started
+  completedAt?: string;      // when task completed
+  timestamp: string;         // legacy, use startedAt/completedAt
 }
 
 export interface Conversation {
+  messages: Message[];
+  claudeSessionId: string | null;
+  updatedAt: string;
+}
+
+// Project-related interfaces
+export interface Project {
+  id: string;           // folder name e.g. "remote-claude-real"
+  path: string;         // full path e.g. "/home/jamie/projects/remote-claude-real"
+  name: string;         // display name (from package.json or folder)
+  lastAccessed?: string;
+}
+
+export interface ProjectConversation {
+  projectId: string;
   messages: Message[];
   claudeSessionId: string | null;
   updatedAt: string;
@@ -183,4 +220,228 @@ export function clearConversation(): void {
   const empty: Conversation = { messages: [], claudeSessionId: null, updatedAt: new Date().toISOString() };
   writeFileSync(join(CONFIG_DIR, 'conversation.json'), JSON.stringify(empty, null, 2));
   console.log('[store] Conversation and session cleared');
+}
+
+// ============================================
+// Project-related functions
+// ============================================
+
+function ensureProjectsDir() {
+  if (!existsSync(PROJECTS_DIR)) {
+    mkdirSync(PROJECTS_DIR, { recursive: true });
+  }
+}
+
+function getProjectConfigDir(projectId: string): string {
+  return join(PROJECTS_DIR, projectId);
+}
+
+function ensureProjectConfigDir(projectId: string): void {
+  const dir = getProjectConfigDir(projectId);
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+}
+
+// Check if a directory looks like a project
+function hasProjectMarkers(dir: string): boolean {
+  const markers = [
+    'package.json',
+    'Cargo.toml',
+    'go.mod',
+    'pyproject.toml',
+    'setup.py',
+    '.git',
+    'Makefile',
+    'CMakeLists.txt',
+    'pom.xml',
+    'build.gradle',
+  ];
+  return markers.some(marker => existsSync(join(dir, marker)));
+}
+
+// Get project name from package.json or folder name
+function getProjectName(projectPath: string): string {
+  try {
+    const pkgPath = join(projectPath, 'package.json');
+    if (existsSync(pkgPath)) {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+      if (pkg.name) return pkg.name;
+    }
+  } catch {
+    // Ignore errors
+  }
+
+  try {
+    const cargoPath = join(projectPath, 'Cargo.toml');
+    if (existsSync(cargoPath)) {
+      const content = readFileSync(cargoPath, 'utf8');
+      const match = content.match(/name\s*=\s*"([^"]+)"/);
+      if (match) return match[1];
+    }
+  } catch {
+    // Ignore errors
+  }
+
+  return basename(projectPath);
+}
+
+// List all available projects from ~/projects
+export function listProjects(basePath?: string): Project[] {
+  const projectsBase = basePath || DEFAULT_PROJECTS_BASE;
+
+  if (!existsSync(projectsBase)) {
+    console.log('[store] Projects base path does not exist:', projectsBase);
+    return [];
+  }
+
+  try {
+    const dirs = readdirSync(projectsBase);
+    const projects: Project[] = [];
+
+    for (const dir of dirs) {
+      if (dir.startsWith('.')) continue;
+
+      const fullPath = join(projectsBase, dir);
+      try {
+        const stat = statSync(fullPath);
+        if (!stat.isDirectory()) continue;
+
+        if (hasProjectMarkers(fullPath)) {
+          // Check if we have stored lastAccessed
+          let lastAccessed: string | undefined;
+          try {
+            const convPath = join(getProjectConfigDir(dir), 'conversation.json');
+            if (existsSync(convPath)) {
+              const conv = JSON.parse(readFileSync(convPath, 'utf8'));
+              lastAccessed = conv.updatedAt;
+            }
+          } catch {
+            // Ignore
+          }
+
+          projects.push({
+            id: dir,
+            path: fullPath,
+            name: getProjectName(fullPath),
+            lastAccessed,
+          });
+        }
+      } catch {
+        // Skip directories we can't access
+      }
+    }
+
+    // Sort by last accessed (most recent first), then by name
+    return projects.sort((a, b) => {
+      if (a.lastAccessed && b.lastAccessed) {
+        return new Date(b.lastAccessed).getTime() - new Date(a.lastAccessed).getTime();
+      }
+      if (a.lastAccessed) return -1;
+      if (b.lastAccessed) return 1;
+      return a.name.localeCompare(b.name);
+    });
+  } catch (err) {
+    console.error('[store] Failed to list projects:', err);
+    return [];
+  }
+}
+
+// Load conversation for a specific project
+export function loadProjectConversation(projectId: string): ProjectConversation {
+  try {
+    const convPath = join(getProjectConfigDir(projectId), 'conversation.json');
+    if (!existsSync(convPath)) {
+      return {
+        projectId,
+        messages: [],
+        claudeSessionId: null,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+    const data = JSON.parse(readFileSync(convPath, 'utf8'));
+    // Ensure all fields exist
+    return {
+      projectId,
+      messages: data.messages || [],
+      claudeSessionId: data.claudeSessionId || null,
+      updatedAt: data.updatedAt || new Date().toISOString(),
+    };
+  } catch (err) {
+    console.error(`[store] Failed to load project conversation for ${projectId}:`, err);
+    return {
+      projectId,
+      messages: [],
+      claudeSessionId: null,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+}
+
+// Save conversation for a specific project
+export function saveProjectConversation(projectId: string, conversation: ProjectConversation): void {
+  ensureProjectsDir();
+  ensureProjectConfigDir(projectId);
+  conversation.updatedAt = new Date().toISOString();
+  const convPath = join(getProjectConfigDir(projectId), 'conversation.json');
+  writeFileSync(convPath, JSON.stringify(conversation, null, 2));
+  console.log(`[store] Project ${projectId} conversation saved, messages:`, conversation.messages.length);
+}
+
+// Add message to a specific project
+export function addProjectMessage(projectId: string, message: Message): ProjectConversation {
+  const conversation = loadProjectConversation(projectId);
+  conversation.messages.push(message);
+  saveProjectConversation(projectId, conversation);
+  return conversation;
+}
+
+// Get Claude session ID for a specific project
+export function getProjectSessionId(projectId: string): string | null {
+  const conversation = loadProjectConversation(projectId);
+  return conversation.claudeSessionId;
+}
+
+// Save Claude session ID for a specific project
+export function saveProjectSessionId(projectId: string, sessionId: string): void {
+  const conversation = loadProjectConversation(projectId);
+  conversation.claudeSessionId = sessionId;
+  saveProjectConversation(projectId, conversation);
+  console.log(`[store] Project ${projectId} session ID saved:`, sessionId);
+}
+
+// Clear conversation for a specific project
+export function clearProjectConversation(projectId: string): void {
+  ensureProjectsDir();
+  ensureProjectConfigDir(projectId);
+  const empty: ProjectConversation = {
+    projectId,
+    messages: [],
+    claudeSessionId: null,
+    updatedAt: new Date().toISOString(),
+  };
+  const convPath = join(getProjectConfigDir(projectId), 'conversation.json');
+  writeFileSync(convPath, JSON.stringify(empty, null, 2));
+  console.log(`[store] Project ${projectId} conversation and session cleared`);
+}
+
+// Get project by ID (validates it exists)
+export function getProject(projectId: string, basePath?: string): Project | null {
+  const projectsBase = basePath || DEFAULT_PROJECTS_BASE;
+  const fullPath = join(projectsBase, projectId);
+
+  if (!existsSync(fullPath)) return null;
+
+  try {
+    const stat = statSync(fullPath);
+    if (!stat.isDirectory()) return null;
+
+    return {
+      id: projectId,
+      path: fullPath,
+      name: getProjectName(fullPath),
+    };
+  } catch {
+    return null;
+  }
 }
