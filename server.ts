@@ -259,7 +259,23 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       paired: devices.length > 0,
       devices: devices.map(d => ({ id: d.id, createdAt: d.createdAt })),
       deviceCount: devices.length,
-      pairingUrl: serverState.pairingToken ? `${serverUrl}/pair/${serverState.pairingToken}` : null,
+      pairingUrl: serverState.pairingToken ? `${clientUrl}/pair?server=${encodeURIComponent(serverUrl)}&token=${serverState.pairingToken}` : null,
+    });
+  }
+
+  // API: Generate new pairing token (invalidates previous one)
+  if (pathname === '/api/new-pair-token' && method === 'POST') {
+    reloadState();
+    serverState.pairingToken = randomBytes(16).toString('hex');
+    saveServerState(serverState);
+    const pairUrl = `${clientUrl}/pair?server=${encodeURIComponent(serverUrl)}&token=${serverState.pairingToken}`;
+    console.log(`> New pairing token generated`);
+    console.log(`> URL: ${pairUrl}`);
+    console.log('');
+    qrcode.generate(pairUrl, { small: true });
+    return json(res, {
+      pairingUrl: pairUrl,
+      token: serverState.pairingToken
     });
   }
 
@@ -486,6 +502,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     addDevice(newDevice);
     devices = loadDevices();
     console.log(`> New device paired: ${newDevice.id} (total: ${devices.length})`);
+
+    // Invalidate token after use (one-time use)
+    serverState.pairingToken = null;
+    saveServerState(serverState);
+    console.log('> Pairing token invalidated (one-time use)');
 
     return json(res, { serverPublicKey: serverState.publicKey, deviceId: newDevice.id });
   }

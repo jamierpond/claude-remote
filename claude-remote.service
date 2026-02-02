@@ -7,6 +7,7 @@ Type=simple
 WorkingDirectory=/home/jamie/projects/remote-claude-real
 ExecStart=/home/jamie/.nix-profile/bin/pnpm tsx server.ts
 Environment=NODE_ENV=production
+Environment=PATH=/home/jamie/.local/bin:/home/jamie/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin
 Restart=always
 RestartSec=3
 
