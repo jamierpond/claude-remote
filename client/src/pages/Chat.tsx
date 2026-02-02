@@ -232,6 +232,8 @@ export default function Chat({ token }: Props) {
             completedAt: m.completedAt,
           }));
           updateProjectState(projectId, state => ({ ...state, messages: loadedMessages }));
+          // Scroll to bottom after messages are rendered
+          setTimeout(() => scrollToBottom(true), 100);
         }
         return; // Success
       } catch (err) {
