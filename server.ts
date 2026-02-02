@@ -740,8 +740,14 @@ async function main() {
             return;
           }
 
+          // Transform error events: Claude uses 'text', client expects 'error'
+          let transformedEvent = event;
+          if (event.type === 'error' && event.text && !('error' in event)) {
+            transformedEvent = { ...event, error: event.text };
+          }
+          
           // Include projectId in all events sent to client
-          const eventWithProject = projectId ? { ...event, projectId } : event;
+          const eventWithProject = projectId ? { ...transformedEvent, projectId } : transformedEvent;
 
           // Try to send to connected client, or write to disk
           const clientWs = connectedClients.get(deviceId);
