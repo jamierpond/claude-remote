@@ -484,13 +484,37 @@ export default function Chat({ token }: Props) {
   };
 
   const handleCancel = async () => {
-    if (!wsRef.current || !sharedKeyRef.current) return;
+    console.log('handleCancel called');
 
-    const encrypted = await encrypt(
-      JSON.stringify({ type: 'cancel' }),
-      sharedKeyRef.current
-    );
-    wsRef.current.send(JSON.stringify(encrypted));
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      const msg = 'Cannot cancel - WebSocket not connected. Click Reset instead.';
+      console.error(msg);
+      alert(msg);
+      setIsStreaming(false);
+      return;
+    }
+
+    if (!sharedKeyRef.current) {
+      const msg = 'Cannot cancel - no shared key. Click Reset instead.';
+      console.error(msg);
+      alert(msg);
+      setIsStreaming(false);
+      return;
+    }
+
+    try {
+      const encrypted = await encrypt(
+        JSON.stringify({ type: 'cancel' }),
+        sharedKeyRef.current
+      );
+      wsRef.current.send(JSON.stringify(encrypted));
+      setIsStreaming(false);
+    } catch (err) {
+      const msg = `Failed to send cancel: ${err}`;
+      console.error(msg);
+      alert(msg);
+      setIsStreaming(false);
+    }
   };
 
   if (view === 'pairing') {
