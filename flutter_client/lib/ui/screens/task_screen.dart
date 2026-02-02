@@ -454,7 +454,7 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
                 textInputAction: TextInputAction.newline, // Allow multiline
                 style: const TextStyle(color: AppColors.textPrimary),
                 decoration: InputDecoration(
-                  hintText: isStreaming ? 'Working...' : 'Enter a task... (Shift+Enter for new line)',
+                  hintText: isStreaming ? 'Working...' : 'Enter a task...',
                   hintStyle: const TextStyle(color: AppColors.textMuted),
                   filled: true,
                   fillColor: AppColors.surfaceVariant,
