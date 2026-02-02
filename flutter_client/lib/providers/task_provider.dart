@@ -312,11 +312,16 @@ class TaskManagerNotifier extends StateNotifier<TaskManagerState> {
     newStreaming.add(projectId);
     state = state.copyWith(streamingProjectIds: newStreaming);
 
-    // Initialize project state with new task
-    state = state.updateProject(projectId, (s) => ProjectTaskState(
-      messages: [...s.messages, Task(prompt: prompt, startedAt: DateTime.now())],
+    // Set current task (don't add to messages yet - that happens on 'done')
+    state = state.updateProject(projectId, (s) => s.copyWith(
       currentTask: task,
       isStreaming: true,
+      // Clear buffers for new task
+      thinkingBuffer: '',
+      textBuffer: '',
+      chunks: [],
+      activities: [],
+      lastTool: null,
     ));
 
     await webSocket!.sendMessage(prompt, projectId: projectId);

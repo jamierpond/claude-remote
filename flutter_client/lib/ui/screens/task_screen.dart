@@ -23,11 +23,27 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
   final _inputController = TextEditingController();
   final _scrollController = ScrollController();
   bool _showProjectPicker = false;
+  bool _initialPickerShown = false;
 
   @override
   void initState() {
     super.initState();
     _restoreState();
+    // Show project picker on first load if no projects open
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkInitialProjectPicker();
+    });
+  }
+
+  void _checkInitialProjectPicker() {
+    if (_initialPickerShown) return;
+    final projectState = ref.read(projectProvider);
+    if (projectState.openProjects.isEmpty) {
+      setState(() {
+        _showProjectPicker = true;
+        _initialPickerShown = true;
+      });
+    }
   }
 
   Future<void> _restoreState() async {
