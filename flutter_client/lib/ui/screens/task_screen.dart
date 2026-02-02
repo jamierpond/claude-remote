@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/task.dart';
 import '../../providers/task_provider.dart';
@@ -24,6 +25,7 @@ class TaskScreen extends ConsumerStatefulWidget {
 class _TaskScreenState extends ConsumerState<TaskScreen> {
   final _inputController = TextEditingController();
   final _scrollController = ScrollController();
+  final _inputFocusNode = FocusNode();
   bool _showProjectPicker = false;
   bool _initialPickerShown = false;
 
@@ -441,28 +443,32 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
       child: Row(
         children: [
           Expanded(
-            child: TextField(
-              controller: _inputController,
-              enabled: !isStreaming,
-              maxLines: null,
-              textCapitalization: TextCapitalization.sentences,
-              style: const TextStyle(color: AppColors.textPrimary),
-              decoration: InputDecoration(
-                hintText: isStreaming ? 'Working...' : 'Enter a task...',
-                hintStyle: const TextStyle(color: AppColors.textMuted),
-                filled: true,
-                fillColor: AppColors.surfaceVariant,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(AppRadius.xl),
-                  borderSide: BorderSide.none,
+            child: Focus(
+              focusNode: _inputFocusNode,
+              onKeyEvent: _handleKeyEvent,
+              child: TextField(
+                controller: _inputController,
+                enabled: !isStreaming,
+                maxLines: null,
+                textCapitalization: TextCapitalization.sentences,
+                textInputAction: TextInputAction.newline, // Allow multiline
+                style: const TextStyle(color: AppColors.textPrimary),
+                decoration: InputDecoration(
+                  hintText: isStreaming ? 'Working...' : 'Enter a task... (Shift+Enter for new line)',
+                  hintStyle: const TextStyle(color: AppColors.textMuted),
+                  filled: true,
+                  fillColor: AppColors.surfaceVariant,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(AppRadius.xl),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: AppSpacing.md,
+                  ),
                 ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: AppSpacing.md,
-                ),
+                onChanged: (_) => _saveState(),
               ),
-              onChanged: (_) => _saveState(),
-              onSubmitted: (_) => _sendTask(),
             ),
           ),
           AppSpacing.gapHorizontalMd,
@@ -502,11 +508,26 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
     );
   }
 
+  /// Handle keyboard events for Enter/Shift+Enter behavior
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.enter) {
+      final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
+      if (!isShiftPressed) {
+        // Enter without Shift: send the task
+        _sendTask();
+        return KeyEventResult.handled;
+      }
+      // Shift+Enter: allow default behavior (newline)
+    }
+    return KeyEventResult.ignored;
+  }
+
   @override
   void dispose() {
     _saveState();
     _inputController.dispose();
     _scrollController.dispose();
+    _inputFocusNode.dispose();
     super.dispose();
   }
 }
