@@ -1,14 +1,31 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import ProjectTabs, { type Project } from '../components/ProjectTabs';
+import ProjectPicker from '../components/ProjectPicker';
+import StreamingResponse, { type ToolActivity } from '../components/StreamingResponse';
+import ToolStack from '../components/ToolStack';
+import GitStatus from '../components/GitStatus';
+
 
 interface Props {
   token: string | null;
   onNavigate: (route: 'home' | 'chat' | 'pair') => void;
 }
 
+interface OutputChunk {
+  text: string;
+  timestamp: number;
+  afterTool?: string;
+}
+
 interface Message {
   role: 'user' | 'assistant';
   content: string;
+  task?: string;              // user's original prompt (for assistant messages)
+  chunks?: OutputChunk[];     // structured output chunks
   thinking?: string;
+  activity?: ToolActivity[];
+  startedAt?: string;
+  completedAt?: string;
 }
 
 interface EncryptedData {
@@ -96,56 +113,193 @@ async function decrypt(data: EncryptedData, key: CryptoKey): Promise<string> {
 
 type View = 'pairing' | 'pin' | 'chat';
 
+// Per-project state container
+interface ProjectState {
+  messages: Message[];
+  isStreaming: boolean;
+  currentThinking: string;
+  currentResponse: string;
+  currentActivity: ToolActivity[];
+  currentTask: string;         // The user prompt for current streaming task
+  taskStartTime: number | null; // When the current task started
+}
+
+function createEmptyProjectState(): ProjectState {
+  return {
+    messages: [],
+    isStreaming: false,
+    currentThinking: '',
+    currentResponse: '',
+    currentActivity: [],
+    currentTask: '',
+    taskStartTime: null,
+  };
+}
+
 export default function Chat({ token }: Props) {
   const [view, setView] = useState<View>('pairing');
-  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [currentThinking, setCurrentThinking] = useState('');
-  const [currentResponse, setCurrentResponse] = useState('');
+
+  // Multi-project state
+  const [openProjects, setOpenProjects] = useState<Project[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [projectStates, setProjectStates] = useState<Map<string, ProjectState>>(new Map());
+  const [streamingProjectIds, setStreamingProjectIds] = useState<Set<string>>(new Set());
+  const [showProjectPicker, setShowProjectPicker] = useState(false);
+  const tabsRestoredRef = useRef(false);
+
+  // Refs for streaming (per-project)
+  const thinkingRefs = useRef<Map<string, string>>(new Map());
+  const responseRefs = useRef<Map<string, string>>(new Map());
+  const activityRefs = useRef<Map<string, ToolActivity[]>>(new Map());
 
   const wsRef = useRef<WebSocket | null>(null);
   const sharedKeyRef = useRef<CryptoKey | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const thinkingRef = useRef('');
-  const responseRef = useRef('');
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  // Helper to get current project state
+  const getProjectState = useCallback((projectId: string | null): ProjectState => {
+    if (!projectId) return createEmptyProjectState();
+    return projectStates.get(projectId) || createEmptyProjectState();
+  }, [projectStates]);
 
-  const fetchConversationHistory = async () => {
-    console.log('Fetching conversation history...');
+  // Helper to update project state
+  const updateProjectState = useCallback((projectId: string, updater: (state: ProjectState) => ProjectState) => {
+    setProjectStates(prev => {
+      const current = prev.get(projectId) || createEmptyProjectState();
+      const updated = updater(current);
+      const next = new Map(prev);
+      next.set(projectId, updated);
+      return next;
+    });
+  }, []);
+
+  // Current active project state (for display)
+  const activeState = getProjectState(activeProjectId);
+  const messages = activeState.messages;
+  const isStreaming = activeState.isStreaming;
+  const currentThinking = activeState.currentThinking;
+  const currentResponse = activeState.currentResponse;
+  const currentActivity = activeState.currentActivity;
+  const currentTask = activeState.currentTask;
+  const taskStartTime = activeState.taskStartTime;
+
+  const scrollToBottom = useCallback((force = false) => {
+    if (!messagesEndRef.current) return;
+
+    // Only auto-scroll if user is near the bottom (within 150px) or forced
+    const container = messagesEndRef.current.parentElement;
+    if (container && !force) {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+      if (distanceFromBottom > 150) return; // User scrolled up, don't interrupt
+    }
+
+    messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+  }, []);
+
+  // Fetch conversation history for a specific project
+  const fetchProjectConversation = useCallback(async (projectId: string, retries = 3) => {
+    console.log(`Fetching conversation history for project: ${projectId}`);
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/conversation`);
+        if (!res.ok) {
+          throw new Error(`Failed to fetch history: ${res.status}`);
+        }
+        const data = await res.json();
+        console.log(`Loaded conversation for ${projectId}:`, data.messages?.length, 'messages');
+        if (data.messages && data.messages.length > 0) {
+          const loadedMessages = data.messages.map((m: {
+            role: string;
+            content: string;
+            task?: string;
+            chunks?: OutputChunk[];
+            thinking?: string;
+            activity?: ToolActivity[];
+            startedAt?: string;
+            completedAt?: string;
+          }) => ({
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+            task: m.task,
+            chunks: m.chunks,
+            thinking: m.thinking,
+            activity: m.activity,
+            startedAt: m.startedAt,
+            completedAt: m.completedAt,
+          }));
+          updateProjectState(projectId, state => ({ ...state, messages: loadedMessages }));
+        }
+        return; // Success
+      } catch (err) {
+        console.error(`Failed to fetch project conversation (attempt ${attempt}/${retries}):`, err);
+        if (attempt < retries) {
+          await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+        }
+      }
+    }
+    console.error('All retries failed for project conversation');
+  }, [updateProjectState]);
+
+  // Fetch streaming state for a project (to restore in-progress responses on reconnect)
+  const fetchProjectStreamingState = useCallback(async (projectId: string) => {
+    console.log(`Fetching streaming state for project: ${projectId}`);
     try {
-      const res = await fetch('/api/conversation');
+      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/streaming`);
       if (!res.ok) {
-        throw new Error(`Failed to fetch history: ${res.status}`);
+        throw new Error(`Failed to fetch streaming state: ${res.status}`);
       }
       const data = await res.json();
-      console.log('Loaded conversation history:', data.messages?.length, 'messages');
-      if (data.messages && data.messages.length > 0) {
-        setMessages(data.messages.map((m: { role: string; content: string; thinking?: string }) => ({
-          role: m.role as 'user' | 'assistant',
-          content: m.content,
-          thinking: m.thinking,
-        })));
+      console.log(`Streaming state for ${projectId}:`, data);
+
+      if (data.isStreaming && data.partial) {
+        // Restore streaming state
+        setStreamingProjectIds(prev => {
+          const next = new Set(prev);
+          next.add(projectId);
+          return next;
+        });
+
+        // Update refs with partial data
+        if (data.partial.thinking) {
+          thinkingRefs.current.set(projectId, data.partial.thinking);
+        }
+        if (data.partial.text) {
+          responseRefs.current.set(projectId, data.partial.text);
+        }
+        if (data.partial.activity && data.partial.activity.length > 0) {
+          activityRefs.current.set(projectId, data.partial.activity);
+        }
+
+        // Update project state with restored streaming data
+        updateProjectState(projectId, state => ({
+          ...state,
+          isStreaming: true,
+          currentThinking: data.partial.thinking || '',
+          currentResponse: data.partial.text || '',
+          currentActivity: data.partial.activity || [],
+        }));
       }
     } catch (err) {
-      console.error('Failed to fetch conversation history:', err);
-      // Don't show error to user - just start fresh
+      console.error(`Failed to fetch streaming state for ${projectId}:`, err);
     }
-  };
+  }, [updateProjectState]);
 
   const clearHistory = async () => {
-    console.log('Clearing conversation history...');
+    if (!activeProjectId) {
+      alert('No project selected');
+      return;
+    }
+    console.log(`Clearing conversation history for project: ${activeProjectId}`);
     try {
-      const res = await fetch('/api/conversation', { method: 'DELETE' });
+      const res = await fetch(`/api/projects/${encodeURIComponent(activeProjectId)}/conversation`, { method: 'DELETE' });
       if (!res.ok) {
         throw new Error(`Failed to clear history: ${res.status}`);
       }
-      setMessages([]);
+      updateProjectState(activeProjectId, state => ({ ...state, messages: [] }));
       console.log('History cleared');
     } catch (err) {
       const msg = `Failed to clear history: ${err}`;
@@ -154,9 +308,36 @@ export default function Chat({ token }: Props) {
     }
   };
 
+  // Scroll to bottom when new messages arrive or project changes (force scroll)
+  const messagesLength = messages.length;
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, currentThinking, currentResponse]);
+    scrollToBottom(true);
+  }, [messagesLength, activeProjectId, scrollToBottom]);
+
+  // Scroll during streaming only if user is near bottom (don't interrupt if scrolled up)
+  useEffect(() => {
+    if (isStreaming) {
+      scrollToBottom(false);
+    }
+  }, [currentThinking, currentResponse, currentActivity, isStreaming, scrollToBottom]);
+
+  // Persist open tabs to localStorage
+  useEffect(() => {
+    if (openProjects.length > 0) {
+      localStorage.setItem('claude-remote-open-projects', JSON.stringify(openProjects));
+    } else {
+      localStorage.removeItem('claude-remote-open-projects');
+    }
+  }, [openProjects]);
+
+  // Persist active tab to localStorage
+  useEffect(() => {
+    if (activeProjectId) {
+      localStorage.setItem('claude-remote-active-project', activeProjectId);
+    } else {
+      localStorage.removeItem('claude-remote-active-project');
+    }
+  }, [activeProjectId]);
 
   useEffect(() => {
     console.log('Chat useEffect: token =', token);
@@ -297,7 +478,6 @@ export default function Chat({ token }: Props) {
           console.error(err);
           alert(err);
           setError(err);
-          setIsStreaming(false);
           return;
         }
 
@@ -309,7 +489,6 @@ export default function Chat({ token }: Props) {
           console.error(msg, event.data);
           alert(msg);
           setError(msg);
-          setIsStreaming(false);
           return;
         }
 
@@ -321,11 +500,20 @@ export default function Chat({ token }: Props) {
           console.error(msg, err, encrypted);
           alert(msg);
           setError(msg);
-          setIsStreaming(false);
           return;
         }
 
-        let msg: { type: string; text?: string; error?: string };
+        let msg: {
+          type: string;
+          text?: string;
+          thinking?: string;
+          error?: string;
+          projectId?: string;
+          activeProjectIds?: string[];
+          activity?: ToolActivity[];
+          toolUse?: { tool: string; input: Record<string, unknown> };
+          toolResult?: { tool: string; output?: string; error?: string };
+        };
         try {
           msg = JSON.parse(decrypted);
         } catch (err) {
@@ -333,62 +521,228 @@ export default function Chat({ token }: Props) {
           console.error(errMsg, decrypted);
           alert(errMsg);
           setError(errMsg);
-          setIsStreaming(false);
           return;
         }
+
+        // Get projectId from message (streaming events include it)
+        const projectId = msg.projectId;
 
         if (msg.type === 'auth_ok') {
           setError('');
           setView('chat');
-          // Fetch conversation history
-          fetchConversationHistory();
+
+          // Set streaming indicators for any active jobs
+          // Server sends activeProjectIds which we trust - pending events will fill in the content
+          const activeIds = msg.activeProjectIds || [];
+          if (activeIds.length > 0) {
+            console.log('Active streaming projects on reconnect:', activeIds);
+            setStreamingProjectIds(new Set(activeIds.filter(id => id !== '__global__')));
+            // Mark these projects as streaming so UI shows the indicator
+            activeIds.forEach(projectId => {
+              if (projectId !== '__global__') {
+                updateProjectState(projectId, state => ({
+                  ...state,
+                  isStreaming: true,
+                }));
+              }
+            });
+          }
+
+          // Restore tabs from localStorage, or show picker if none saved
+          if (!tabsRestoredRef.current) {
+            tabsRestoredRef.current = true;
+            const savedProjects = localStorage.getItem('claude-remote-open-projects');
+            const savedActiveId = localStorage.getItem('claude-remote-active-project');
+
+            if (savedProjects) {
+              try {
+                const projects: Project[] = JSON.parse(savedProjects);
+                if (projects.length > 0) {
+                  setOpenProjects(projects);
+                  // Initialize state for each project (mark as streaming if active)
+                  const newStates = new Map<string, ProjectState>();
+                  projects.forEach(p => {
+                    const isStreaming = activeIds.includes(p.id);
+                    newStates.set(p.id, {
+                      ...createEmptyProjectState(),
+                      isStreaming,
+                    });
+                  });
+                  setProjectStates(newStates);
+                  // Restore active project or default to first
+                  const activeId = savedActiveId && projects.find(p => p.id === savedActiveId)
+                    ? savedActiveId
+                    : projects[0].id;
+                  setActiveProjectId(activeId);
+                  // Fetch conversation history for all open projects
+                  // Pending WebSocket events will restore any in-progress streaming content
+                  projects.forEach(p => {
+                    fetchProjectConversation(p.id);
+                  });
+                  return;
+                }
+              } catch (err) {
+                console.error('Failed to restore saved projects:', err);
+              }
+            }
+            // No saved projects, show picker
+            setShowProjectPicker(true);
+          }
         } else if (msg.type === 'auth_error') {
           const errMsg = `AUTH FAILED: ${msg.error || 'Unknown auth error'}`;
           console.error(errMsg);
           alert(errMsg);
           setError(errMsg);
-        } else if (msg.type === 'thinking') {
-          thinkingRef.current += msg.text || '';
-          setCurrentThinking(thinkingRef.current);
-        } else if (msg.type === 'text') {
-          responseRef.current += msg.text || '';
-          setCurrentResponse(responseRef.current);
-        } else if (msg.type === 'done') {
-          setIsStreaming(false);
-          const thinking = thinkingRef.current;
-          const response = responseRef.current;
-          if (thinking || response) {
-            setMessages(prev => [...prev, {
-              role: 'assistant',
-              content: response,
-              thinking: thinking || undefined,
-            }]);
+        } else if (msg.type === 'streaming_restore' && projectId) {
+          // Restore accumulated streaming state from server
+          // This arrives BEFORE pending delta events, so we SET (not append)
+          console.log(`Restoring streaming state for ${projectId}:`, {
+            thinking: msg.thinking?.length || 0,
+            text: msg.text?.length || 0,
+            activity: msg.activity?.length || 0,
+          });
+
+          if (msg.thinking) {
+            thinkingRefs.current.set(projectId, msg.thinking);
           }
-          thinkingRef.current = '';
-          responseRef.current = '';
-          setCurrentThinking('');
-          setCurrentResponse('');
+          if (msg.text) {
+            responseRefs.current.set(projectId, msg.text);
+          }
+          if (msg.activity && msg.activity.length > 0) {
+            activityRefs.current.set(projectId, msg.activity);
+          }
+
+          updateProjectState(projectId, state => ({
+            ...state,
+            isStreaming: true,
+            currentThinking: msg.thinking || '',
+            currentResponse: msg.text || '',
+            currentActivity: msg.activity || [],
+          }));
+        } else if (msg.type === 'thinking' && projectId) {
+          const currentThinking = thinkingRefs.current.get(projectId) || '';
+          thinkingRefs.current.set(projectId, currentThinking + (msg.text || ''));
+          updateProjectState(projectId, state => ({
+            ...state,
+            currentThinking: thinkingRefs.current.get(projectId) || ''
+          }));
+        } else if (msg.type === 'text' && projectId) {
+          const currentResponse = responseRefs.current.get(projectId) || '';
+          responseRefs.current.set(projectId, currentResponse + (msg.text || ''));
+          updateProjectState(projectId, state => ({
+            ...state,
+            currentResponse: responseRefs.current.get(projectId) || ''
+          }));
+        } else if (msg.type === 'tool_use' && msg.toolUse && projectId) {
+          const activity: ToolActivity = {
+            type: 'tool_use',
+            tool: msg.toolUse.tool,
+            input: msg.toolUse.input,
+            timestamp: Date.now()
+          };
+          const currentActivity = activityRefs.current.get(projectId) || [];
+          activityRefs.current.set(projectId, [...currentActivity, activity]);
+          updateProjectState(projectId, state => ({
+            ...state,
+            currentActivity: activityRefs.current.get(projectId) || []
+          }));
+        } else if (msg.type === 'tool_result' && msg.toolResult && projectId) {
+          const activity: ToolActivity = {
+            type: 'tool_result',
+            tool: msg.toolResult.tool,
+            output: msg.toolResult.output,
+            error: msg.toolResult.error,
+            timestamp: Date.now()
+          };
+          const currentActivity = activityRefs.current.get(projectId) || [];
+          activityRefs.current.set(projectId, [...currentActivity, activity]);
+          updateProjectState(projectId, state => ({
+            ...state,
+            currentActivity: activityRefs.current.get(projectId) || []
+          }));
+        } else if (msg.type === 'done' && projectId) {
+          const thinking = thinkingRefs.current.get(projectId) || '';
+          const response = responseRefs.current.get(projectId) || '';
+          const activity = activityRefs.current.get(projectId) || [];
+
+          // Clear streaming state
+          setStreamingProjectIds(prev => {
+            const next = new Set(prev);
+            next.delete(projectId);
+            return next;
+          });
+
+          // Add message to project state
+          updateProjectState(projectId, state => {
+            const task = state.currentTask;
+            const startedAt = state.taskStartTime ? new Date(state.taskStartTime).toISOString() : undefined;
+            const completedAt = new Date().toISOString();
+
+            return {
+              ...state,
+              isStreaming: false,
+              currentThinking: '',
+              currentResponse: '',
+              currentActivity: [],
+              currentTask: '',
+              taskStartTime: null,
+              messages: (thinking || response || activity.length > 0)
+                ? [...state.messages, {
+                    role: 'assistant' as const,
+                    content: response,
+                    task: task || undefined,
+                    thinking: thinking || undefined,
+                    activity: activity.length > 0 ? activity : undefined,
+                    startedAt,
+                    completedAt,
+                  }]
+                : state.messages,
+            };
+          });
+
+          // Clear refs
+          thinkingRefs.current.delete(projectId);
+          responseRefs.current.delete(projectId);
+          activityRefs.current.delete(projectId);
         } else if (msg.type === 'error') {
           const errMsg = `SERVER ERROR: ${msg.error || 'Unknown server error'}`;
           console.error(errMsg);
           alert(errMsg);
           setError(errMsg);
-          setIsStreaming(false);
+          if (projectId) {
+            setStreamingProjectIds(prev => {
+              const next = new Set(prev);
+              next.delete(projectId);
+              return next;
+            });
+            updateProjectState(projectId, state => ({
+              ...state,
+              isStreaming: false,
+            }));
+          }
         } else {
-          const errMsg = `Unknown message type: ${msg.type}`;
-          console.error(errMsg, msg);
-          setError(errMsg);
+          console.log('Unknown or unhandled message type:', msg.type, msg);
         }
       };
 
       ws.onclose = (event) => {
-        const msg = `WebSocket CLOSED: code=${event.code} reason="${event.reason || 'none'}"`;
-        console.error(msg);
+        console.log(`WebSocket CLOSED: code=${event.code} reason="${event.reason || 'none'}"`);
         wsRef.current = null;
-        setIsStreaming(false);
+        // Clear all streaming states
+        setStreamingProjectIds(new Set());
+        setProjectStates(prev => {
+          const next = new Map(prev);
+          for (const [id, state] of next) {
+            if (state.isStreaming) {
+              next.set(id, { ...state, isStreaming: false });
+            }
+          }
+          return next;
+        });
         if (event.code !== 1000) {
-          alert(msg);
-          setError(msg);
+          // Connection lost unexpectedly - go back to PIN view to reconnect
+          setError('Connection lost. Please re-enter PIN to reconnect.');
+          setView('pin');
         }
       };
 
@@ -397,11 +751,10 @@ export default function Chat({ token }: Props) {
         console.error(msg, event);
         alert(msg);
         setError(msg);
-        setIsStreaming(false);
         reject(new Error(msg));
       };
     });
-  }, []);
+  }, [updateProjectState]);
 
   const handlePinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -469,9 +822,15 @@ export default function Chat({ token }: Props) {
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('handleSend called', { input, isStreaming, wsRef: wsRef.current, sharedKey: sharedKeyRef.current });
+    console.log('handleSend called', { input, isStreaming, activeProjectId, wsRef: wsRef.current, sharedKey: sharedKeyRef.current });
 
     if (!input.trim()) {
+      return;
+    }
+
+    if (!activeProjectId) {
+      alert('Please select a project first');
+      setShowProjectPicker(true);
       return;
     }
 
@@ -501,16 +860,31 @@ export default function Chat({ token }: Props) {
     const text = input.trim();
     setInput('');
     setError(''); // Clear any previous errors
-    setMessages(prev => [...prev, { role: 'user', content: text }]);
-    setIsStreaming(true);
-    thinkingRef.current = '';
-    responseRef.current = '';
-    setCurrentThinking('');
-    setCurrentResponse('');
+
+    // Add user message to project state
+    const taskStartTime = Date.now();
+    updateProjectState(activeProjectId, state => ({
+      ...state,
+      messages: [...state.messages, { role: 'user' as const, content: text }],
+      isStreaming: true,
+      currentThinking: '',
+      currentResponse: '',
+      currentActivity: [],
+      currentTask: text,
+      taskStartTime,
+    }));
+
+    // Mark project as streaming
+    setStreamingProjectIds(prev => new Set(prev).add(activeProjectId));
+
+    // Clear refs for this project
+    thinkingRefs.current.set(activeProjectId, '');
+    responseRefs.current.set(activeProjectId, '');
+    activityRefs.current.set(activeProjectId, []);
 
     try {
       const encrypted = await encrypt(
-        JSON.stringify({ type: 'message', text }),
+        JSON.stringify({ type: 'message', text, projectId: activeProjectId }),
         sharedKeyRef.current
       );
       wsRef.current.send(JSON.stringify(encrypted));
@@ -519,18 +893,42 @@ export default function Chat({ token }: Props) {
       console.error(msg, err);
       alert(msg);
       setError(msg);
-      setIsStreaming(false);
+      // Revert streaming state
+      if (activeProjectId) {
+        setStreamingProjectIds(prev => {
+          const next = new Set(prev);
+          next.delete(activeProjectId);
+          return next;
+        });
+        updateProjectState(activeProjectId, state => ({
+          ...state,
+          isStreaming: false,
+        }));
+      }
     }
   };
 
   const handleCancel = async () => {
-    console.log('handleCancel called');
+    console.log('handleCancel called', { activeProjectId });
+
+    if (!activeProjectId) {
+      console.error('No active project');
+      return;
+    }
 
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       const msg = 'Cannot cancel - WebSocket not connected. Click Reset instead.';
       console.error(msg);
       alert(msg);
-      setIsStreaming(false);
+      setStreamingProjectIds(prev => {
+        const next = new Set(prev);
+        next.delete(activeProjectId);
+        return next;
+      });
+      updateProjectState(activeProjectId, state => ({
+        ...state,
+        isStreaming: false,
+      }));
       return;
     }
 
@@ -538,23 +936,111 @@ export default function Chat({ token }: Props) {
       const msg = 'Cannot cancel - no shared key. Click Reset instead.';
       console.error(msg);
       alert(msg);
-      setIsStreaming(false);
+      setStreamingProjectIds(prev => {
+        const next = new Set(prev);
+        next.delete(activeProjectId);
+        return next;
+      });
+      updateProjectState(activeProjectId, state => ({
+        ...state,
+        isStreaming: false,
+      }));
       return;
     }
 
     try {
       const encrypted = await encrypt(
-        JSON.stringify({ type: 'cancel' }),
+        JSON.stringify({ type: 'cancel', projectId: activeProjectId }),
         sharedKeyRef.current
       );
       wsRef.current.send(JSON.stringify(encrypted));
-      setIsStreaming(false);
+      setStreamingProjectIds(prev => {
+        const next = new Set(prev);
+        next.delete(activeProjectId);
+        return next;
+      });
+      updateProjectState(activeProjectId, state => ({
+        ...state,
+        isStreaming: false,
+      }));
     } catch (err) {
       const msg = `Failed to send cancel: ${err}`;
       console.error(msg);
       alert(msg);
-      setIsStreaming(false);
+      setStreamingProjectIds(prev => {
+        const next = new Set(prev);
+        next.delete(activeProjectId);
+        return next;
+      });
+      updateProjectState(activeProjectId, state => ({
+        ...state,
+        isStreaming: false,
+      }));
     }
+  };
+
+  // Handle project selection from picker
+  const handleSelectProject = (project: Project) => {
+    console.log('Selected project:', project.id);
+
+    // Add to open projects if not already open
+    if (!openProjects.find(p => p.id === project.id)) {
+      setOpenProjects(prev => [...prev, project]);
+      // Initialize empty state for new project
+      if (!projectStates.has(project.id)) {
+        setProjectStates(prev => {
+          const next = new Map(prev);
+          next.set(project.id, createEmptyProjectState());
+          return next;
+        });
+      }
+      // Fetch conversation history for this project
+      fetchProjectConversation(project.id);
+    }
+
+    // Set as active
+    setActiveProjectId(project.id);
+    setShowProjectPicker(false);
+  };
+
+  // Handle closing a project tab
+  const handleCloseProject = (projectId: string) => {
+    setOpenProjects(prev => prev.filter(p => p.id !== projectId));
+
+    // If closing the active project, switch to another or null
+    if (activeProjectId === projectId) {
+      const remaining = openProjects.filter(p => p.id !== projectId);
+      setActiveProjectId(remaining.length > 0 ? remaining[remaining.length - 1].id : null);
+    }
+
+    // Clear project state
+    setProjectStates(prev => {
+      const next = new Map(prev);
+      next.delete(projectId);
+      return next;
+    });
+  };
+
+  // Reset stuck state for current project
+  const handleReset = () => {
+    setError('');
+    if (activeProjectId) {
+      setStreamingProjectIds(prev => {
+        const next = new Set(prev);
+        next.delete(activeProjectId);
+        return next;
+      });
+      updateProjectState(activeProjectId, state => ({
+        ...state,
+        isStreaming: false,
+        currentThinking: '',
+        currentResponse: '',
+        currentActivity: [],
+        currentTask: '',
+        taskStartTime: null,
+      }));
+    }
+    console.log('State reset by user');
   };
 
   if (view === 'pairing') {
@@ -607,111 +1093,176 @@ export default function Chat({ token }: Props) {
   }
 
   return (
-    <main className="min-h-screen flex flex-col bg-gray-900 text-white">
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.map((msg, i) => (
-          <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[85%] ${msg.role === 'user' ? 'order-1' : ''}`}>
-              {msg.thinking && (
-                <div className="bg-gray-800 rounded-lg p-3 mb-2 text-sm text-gray-400 italic">
-                  <div className="text-xs text-gray-500 mb-1">Thinking...</div>
-                  <div className="whitespace-pre-wrap">{msg.thinking}</div>
-                </div>
-              )}
-              <div className={`rounded-lg p-3 ${msg.role === 'user' ? 'bg-blue-600' : 'bg-gray-700'}`}>
-                <div className="whitespace-pre-wrap">{msg.content}</div>
-              </div>
+    <main className="h-[100dvh] flex flex-col bg-gray-900 text-white">
+      {/* Project Tabs */}
+      <ProjectTabs
+        projects={openProjects}
+        activeProjectId={activeProjectId}
+        streamingProjectIds={streamingProjectIds}
+        onSelectProject={setActiveProjectId}
+        onCloseProject={handleCloseProject}
+        onAddProject={() => setShowProjectPicker(true)}
+      />
+
+      {/* Header */}
+      <header className="flex items-center justify-between px-4 py-2 border-b border-gray-700 bg-gray-900 sticky top-0 z-10">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <h1 className="text-lg font-semibold truncate">
+            {activeProjectId
+              ? openProjects.find(p => p.id === activeProjectId)?.name || activeProjectId
+              : 'Select a project'}
+          </h1>
+          <GitStatus projectId={activeProjectId} />
+        </div>
+        <div className="flex gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={handleReset}
+            className="p-2 text-gray-400 hover:text-white transition-colors"
+            title="Reset stuck state"
+            aria-label="Reset"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onClick={clearHistory}
+            disabled={isStreaming || !activeProjectId}
+            className="p-2 text-gray-400 hover:text-white transition-colors disabled:opacity-50"
+            title="Clear conversation history"
+            aria-label="Clear history"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      {/* Project Picker Modal */}
+      <ProjectPicker
+        isOpen={showProjectPicker}
+        onClose={() => setShowProjectPicker(false)}
+        onSelect={handleSelectProject}
+        openProjectIds={new Set(openProjects.map(p => p.id))}
+      />
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-3 py-4 space-y-3 sm:px-4 sm:space-y-4">
+        {!activeProjectId ? (
+          <div className="flex flex-col items-center justify-center h-full text-center">
+            <div className="p-6 rounded-2xl bg-gray-800/50">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto mb-4 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
+              </svg>
+              <p className="text-gray-400 mb-4">Select a project to start chatting</p>
+              <button
+                onClick={() => setShowProjectPicker(true)}
+                className="px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Open Project
+              </button>
             </div>
           </div>
-        ))}
-
-        {isStreaming && (currentThinking || currentResponse) && (
-          <div className="flex justify-start">
-            <div className="max-w-[85%]">
-              {currentThinking && (
-                <div className="bg-gray-800 rounded-lg p-3 mb-2 text-sm text-gray-400 italic">
-                  <div className="text-xs text-gray-500 mb-1">Thinking...</div>
-                  <div className="whitespace-pre-wrap">{currentThinking}</div>
-                </div>
-              )}
-              {currentResponse && (
-                <div className="bg-gray-700 rounded-lg p-3">
-                  <div className="whitespace-pre-wrap">{currentResponse}</div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {isStreaming && !currentThinking && !currentResponse && (
-          <div className="flex justify-start">
-            <div className="bg-gray-700 rounded-lg p-3">
-              <div className="flex space-x-1">
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:0.1s]" />
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:0.2s]" />
+        ) : (
+          <div className="space-y-4">
+            {messages.map((msg, i) => (
+              <div key={i}>
+                {msg.role === 'user' ? (
+                  // User message - compact bubble on the right
+                  <div className="flex justify-end">
+                    <div className="max-w-[90%] sm:max-w-[85%]">
+                      <div className="rounded-2xl px-4 py-3 bg-blue-600">
+                        <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  // Assistant message - full width response card
+                  <StreamingResponse
+                    thinking={msg.thinking}
+                    activity={msg.activity}
+                    content={msg.content}
+                    task={msg.task}
+                    startedAt={msg.startedAt}
+                    completedAt={msg.completedAt}
+                  />
+                )}
               </div>
-            </div>
+            ))}
+
+            {/* Streaming response */}
+            {isStreaming && (
+              <StreamingResponse
+                thinking={currentThinking}
+                activity={currentActivity}
+                content={currentResponse}
+                task={currentTask}
+                startedAt={taskStartTime ? new Date(taskStartTime).toISOString() : undefined}
+                isStreaming
+              />
+            )}
+
+            {messages.length === 0 && !isStreaming && (
+              <div className="flex flex-col items-center justify-center h-full text-center">
+                <p className="text-gray-500">Start a conversation with Claude in this project</p>
+              </div>
+            )}
           </div>
         )}
 
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="p-4 border-t border-gray-700">
+      {/* Tools stack - shows during streaming */}
+      {isStreaming && currentActivity.length > 0 && (
+        <ToolStack
+          activity={currentActivity}
+          isStreaming={isStreaming}
+        />
+      )}
+
+      {/* Input area */}
+      <div className="border-t border-gray-700 bg-gray-900 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4 sm:py-4">
         {error && (
-          <div className="bg-red-900 border border-red-500 rounded-lg p-3 mb-2">
-            <p className="text-red-200 font-bold">ERROR:</p>
+          <div className="bg-red-900/80 border border-red-500 rounded-xl p-3 mb-3">
+            <p className="text-red-200 font-bold text-sm">ERROR:</p>
             <p className="text-red-300 text-sm">{error}</p>
           </div>
         )}
-        <form onSubmit={handleSend} className="flex gap-2">
+        <form onSubmit={handleSend} className="flex gap-2 items-end">
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={isStreaming ? "Waiting for response..." : "Type a message..."}
-            className="flex-1 p-3 bg-gray-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder={isStreaming ? "Task running..." : "New task..."}
+            className="flex-1 min-h-[44px] px-4 py-3 bg-gray-800 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 text-base"
           />
-          <button
-            type="submit"
-            disabled={!input.trim() || isStreaming}
-            className="px-4 py-3 bg-blue-600 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50"
-          >
-            Send
-          </button>
-          {isStreaming && (
+          {isStreaming ? (
             <button
               type="button"
               onClick={handleCancel}
-              className="px-4 py-3 bg-red-600 rounded-lg font-semibold hover:bg-red-700 transition-colors"
+              className="min-w-[44px] min-h-[44px] flex items-center justify-center bg-red-600 rounded-full font-semibold hover:bg-red-700 active:bg-red-800 transition-colors"
+              aria-label="Cancel"
             >
-              Cancel
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clipRule="evenodd" />
+              </svg>
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!input.trim()}
+              className="min-w-[44px] min-h-[44px] flex items-center justify-center bg-blue-600 rounded-full font-semibold hover:bg-blue-700 active:bg-blue-800 transition-colors disabled:opacity-50 disabled:hover:bg-blue-600"
+              aria-label="Send"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+              </svg>
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => {
-              setIsStreaming(false);
-              setError('');
-              setCurrentThinking('');
-              setCurrentResponse('');
-              console.log('State reset by user');
-            }}
-            className="px-4 py-3 bg-gray-600 rounded-lg font-semibold hover:bg-gray-500 transition-colors"
-            title="Reset stuck state"
-          >
-            Reset
-          </button>
-          <button
-            type="button"
-            onClick={clearHistory}
-            disabled={isStreaming}
-            className="px-4 py-3 bg-yellow-700 rounded-lg font-semibold hover:bg-yellow-600 transition-colors disabled:opacity-50"
-            title="Clear conversation history"
-          >
-            Clear
-          </button>
         </form>
       </div>
     </main>
