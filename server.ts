@@ -934,7 +934,7 @@ async function main() {
     console.log(`> Client URL: ${clientUrl}`);
     console.log(`> Paired devices: ${devices.length}`);
     if (serverState.pairingToken) {
-      const pairUrl = `${serverUrl}/pair/${serverState.pairingToken}`;
+      const pairUrl = `${clientUrl}/pair?server=${encodeURIComponent(serverUrl)}&token=${serverState.pairingToken}`;
       console.log(`> Pair URL: ${pairUrl}`);
       console.log('');
       qrcode.generate(pairUrl, { small: true });
