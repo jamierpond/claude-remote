@@ -74,7 +74,8 @@ export function spawnClaude(
 
   proc.stdout?.on('data', (chunk: Buffer) => {
     const text = chunk.toString();
-    console.log('[claude] stdout chunk received, length:', text.length);
+    console.log('[claude] STDOUT received, length:', text.length);
+    console.log('[claude] STDOUT content:', text.substring(0, 200));
     buffer += text;
     const lines = buffer.split('\n');
     buffer = lines.pop() || '';
@@ -83,14 +84,14 @@ export function spawnClaude(
 
   proc.stderr?.on('data', (chunk: Buffer) => {
     const text = chunk.toString();
-    console.error('[claude] stderr:', text);
+    console.error('[claude] STDERR:', text);
     if (text.trim()) {
       onEvent({ type: 'error', text });
     }
   });
 
-  proc.on('close', (code) => {
-    console.log('[claude] Process closed with code:', code);
+  proc.on('close', (code, signal) => {
+    console.log('[claude] CLOSED - code:', code, 'signal:', signal);
     if (buffer.trim()) {
       processLine(buffer);
     }
@@ -102,9 +103,21 @@ export function spawnClaude(
   });
 
   proc.on('error', (err) => {
-    console.error('[claude] Process error:', err);
+    console.error('[claude] PROCESS ERROR:', err);
     onEvent({ type: 'error', text: err.message });
     onEvent({ type: 'done' });
+  });
+
+  proc.on('spawn', () => {
+    console.log('[claude] SPAWN EVENT - process started successfully');
+  });
+
+  proc.on('disconnect', () => {
+    console.log('[claude] DISCONNECT EVENT');
+  });
+
+  proc.on('exit', (code, signal) => {
+    console.log('[claude] EXIT EVENT - code:', code, 'signal:', signal);
   });
 
   if (signal) {

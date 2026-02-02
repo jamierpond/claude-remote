@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently -n server,client -c blue,green \"tsx server.ts\" \"vite\"",
+    "dev": "concurrently -n server,client -c blue,green \"tsx server.ts\" \"vite\" 2>&1 | tee dev.log",
     "dev:server": "tsx server.ts",
     "dev:client": "vite",
     "build": "vite build",
