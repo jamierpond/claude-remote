@@ -3,6 +3,7 @@ import ProjectTabs, { type Project } from '../components/ProjectTabs';
 import ProjectPicker from '../components/ProjectPicker';
 import StreamingResponse, { type ToolActivity } from '../components/StreamingResponse';
 import ToolStack from '../components/ToolStack';
+import GitStatus from '../components/GitStatus';
 
 
 interface Props {
@@ -1105,12 +1106,15 @@ export default function Chat({ token }: Props) {
 
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-2 border-b border-gray-700 bg-gray-900 sticky top-0 z-10">
-        <h1 className="text-lg font-semibold truncate">
-          {activeProjectId
-            ? openProjects.find(p => p.id === activeProjectId)?.name || activeProjectId
-            : 'Select a project'}
-        </h1>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <h1 className="text-lg font-semibold truncate">
+            {activeProjectId
+              ? openProjects.find(p => p.id === activeProjectId)?.name || activeProjectId
+              : 'Select a project'}
+          </h1>
+          <GitStatus projectId={activeProjectId} />
+        </div>
+        <div className="flex gap-2 shrink-0">
           <button
             type="button"
             onClick={handleReset}
