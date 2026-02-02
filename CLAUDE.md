@@ -23,6 +23,11 @@
 - Use `make reload` to hot-reload connected clients
 - Don't assume changes work - verify they build before moving on
 
+### UI: NO PLACEHOLDER/INOP ELEMENTS
+- Never add UI elements (buttons, icons, etc.) that don't work yet
+- No "TODO: implement" buttons - either implement it fully or don't add it
+- Confusing inop UI is worse than no UI
+
 ## Overview
 Mobile chat interface for local Claude CLI with E2E encryption. Personal use - access Claude from phone via Cloudflare tunnel.
 
