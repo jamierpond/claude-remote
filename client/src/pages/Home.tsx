@@ -33,7 +33,7 @@ export default function Home({ onNavigate }: Props) {
   const handleUnpair = async () => {
     setUnpairing(true);
     try {
-      const res = await fetch('/unpair', { method: 'POST' });
+      const res = await fetch('/api/unpair', { method: 'POST' });
       if (res.ok) {
         localStorage.removeItem('claude-remote-paired');
         localStorage.removeItem('claude-remote-device-id');

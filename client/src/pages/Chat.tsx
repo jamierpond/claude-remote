@@ -134,7 +134,7 @@ export default function Chat({ token }: Props) {
     }
 
     try {
-      const getRes = await fetch(`/pair/${token}`);
+      const getRes = await fetch(`/api/pair/${token}`);
       if (!getRes.ok) {
         const err = await getRes.json();
         setError(err.error || 'Failed to get server key');
@@ -146,7 +146,7 @@ export default function Chat({ token }: Props) {
       const clientPublicKey = await exportPublicKey(keyPair.publicKey);
       const privateKeyJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey);
 
-      const postRes = await fetch(`/pair/${token}`, {
+      const postRes = await fetch(`/api/pair/${token}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clientPublicKey }),

@@ -112,9 +112,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   }
 
   // API: Pair POST - complete pairing
-  if (pathname?.startsWith('/pair/') && method === 'POST') {
+  if (pathname?.startsWith('/api/pair/') && method === 'POST') {
     reloadState();
-    const token = pathname.split('/pair/')[1];
+    const token = pathname.split('/api/pair/')[1];
 
     if (device) {
       return json(res, { error: 'Already paired' }, 400);
@@ -150,7 +150,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   }
 
   // API: Unpair
-  if (pathname === '/unpair' && method === 'POST') {
+  if (pathname === '/api/unpair' && method === 'POST') {
     const { unlinkSync } = await import('fs');
     const { join } = await import('path');
     const { homedir } = await import('os');
