@@ -9,31 +9,43 @@ enum ConnectionState { disconnected, connecting, connected, authenticated }
 class WebSocketMessage {
   final String type;
   final String? text;
+  final String? thinking;
   final String? error;
+  final String? projectId;
+  final List<String>? activeProjectIds;
   final Map<String, dynamic>? toolUse;
   final Map<String, dynamic>? toolResult;
+  final List<dynamic>? activity;
   final bool? hasActiveJob;
   final Map<String, dynamic>? activeJob;
   final String? sessionId;
-  
+
   WebSocketMessage({
     required this.type,
     this.text,
+    this.thinking,
     this.error,
+    this.projectId,
+    this.activeProjectIds,
     this.toolUse,
     this.toolResult,
+    this.activity,
     this.hasActiveJob,
     this.activeJob,
     this.sessionId,
   });
-  
+
   factory WebSocketMessage.fromJson(Map<String, dynamic> json) {
     return WebSocketMessage(
       type: json['type'] as String,
       text: json['text'] as String?,
+      thinking: json['thinking'] as String?,
       error: json['error'] as String?,
+      projectId: json['projectId'] as String?,
+      activeProjectIds: (json['activeProjectIds'] as List<dynamic>?)?.cast<String>(),
       toolUse: json['toolUse'] as Map<String, dynamic>?,
       toolResult: json['toolResult'] as Map<String, dynamic>?,
+      activity: json['activity'] as List<dynamic>?,
       hasActiveJob: json['hasActiveJob'] as bool?,
       activeJob: json['activeJob'] as Map<String, dynamic>?,
       sessionId: json['sessionId'] as String?,
@@ -93,12 +105,19 @@ class WebSocketManager {
     await _sendEncrypted({'type': 'auth', 'pin': pin});
   }
   
-  Future<void> sendMessage(String text) async {
-    await _sendEncrypted({'type': 'message', 'text': text});
+  Future<void> sendMessage(String text, {String? projectId}) async {
+    await _sendEncrypted({
+      'type': 'message',
+      'text': text,
+      if (projectId != null) 'projectId': projectId,
+    });
   }
-  
-  Future<void> cancel() async {
-    await _sendEncrypted({'type': 'cancel'});
+
+  Future<void> cancel({String? projectId}) async {
+    await _sendEncrypted({
+      'type': 'cancel',
+      if (projectId != null) 'projectId': projectId,
+    });
   }
   
   Future<void> _sendEncrypted(Map<String, dynamic> data) async {

@@ -4,186 +4,349 @@ import '../models/task.dart';
 import '../models/tool_activity.dart';
 import '../core/websocket.dart';
 import 'auth_provider.dart';
+import 'project_provider.dart';
 
-final taskProvider = StateNotifierProvider<TaskNotifier, Task?>((ref) {
+// Per-project task state
+class ProjectTaskState {
+  final List<Task> messages;
+  final Task? currentTask;
+  final bool isStreaming;
+
+  // Streaming buffers
+  final String thinkingBuffer;
+  final String textBuffer;
+  final List<OutputChunk> chunks;
+  final List<ToolActivity> activities;
+  final String? lastTool;
+
+  const ProjectTaskState({
+    this.messages = const [],
+    this.currentTask,
+    this.isStreaming = false,
+    this.thinkingBuffer = '',
+    this.textBuffer = '',
+    this.chunks = const [],
+    this.activities = const [],
+    this.lastTool,
+  });
+
+  ProjectTaskState copyWith({
+    List<Task>? messages,
+    Task? currentTask,
+    bool? isStreaming,
+    String? thinkingBuffer,
+    String? textBuffer,
+    List<OutputChunk>? chunks,
+    List<ToolActivity>? activities,
+    String? lastTool,
+  }) {
+    return ProjectTaskState(
+      messages: messages ?? this.messages,
+      currentTask: currentTask ?? this.currentTask,
+      isStreaming: isStreaming ?? this.isStreaming,
+      thinkingBuffer: thinkingBuffer ?? this.thinkingBuffer,
+      textBuffer: textBuffer ?? this.textBuffer,
+      chunks: chunks ?? this.chunks,
+      activities: activities ?? this.activities,
+      lastTool: lastTool ?? this.lastTool,
+    );
+  }
+
+  ProjectTaskState clearBuffers() {
+    return copyWith(
+      thinkingBuffer: '',
+      textBuffer: '',
+      chunks: [],
+      activities: [],
+      lastTool: null,
+    );
+  }
+}
+
+// Overall task manager state
+class TaskManagerState {
+  final Map<String, ProjectTaskState> projectStates;
+  final Set<String> streamingProjectIds;
+
+  const TaskManagerState({
+    this.projectStates = const {},
+    this.streamingProjectIds = const {},
+  });
+
+  ProjectTaskState getProjectState(String projectId) {
+    return projectStates[projectId] ?? const ProjectTaskState();
+  }
+
+  TaskManagerState copyWith({
+    Map<String, ProjectTaskState>? projectStates,
+    Set<String>? streamingProjectIds,
+  }) {
+    return TaskManagerState(
+      projectStates: projectStates ?? this.projectStates,
+      streamingProjectIds: streamingProjectIds ?? this.streamingProjectIds,
+    );
+  }
+
+  TaskManagerState updateProject(String projectId, ProjectTaskState Function(ProjectTaskState) updater) {
+    final newStates = Map<String, ProjectTaskState>.from(projectStates);
+    newStates[projectId] = updater(getProjectState(projectId));
+    return copyWith(projectStates: newStates);
+  }
+}
+
+final taskManagerProvider = StateNotifierProvider<TaskManagerNotifier, TaskManagerState>((ref) {
   final authState = ref.watch(authStateProvider);
   final authNotifier = ref.watch(authStateProvider.notifier);
-  
-  return TaskNotifier(
+
+  return TaskManagerNotifier(
     webSocket: authNotifier.webSocket,
     isAuthenticated: authState.isAuthenticated,
   );
 });
 
-final taskHistoryProvider = StateNotifierProvider<TaskHistoryNotifier, List<Task>>((ref) {
-  return TaskHistoryNotifier();
+// Convenience provider for the active project's task state
+final activeTaskStateProvider = Provider<ProjectTaskState>((ref) {
+  final projectState = ref.watch(projectProvider);
+  final taskState = ref.watch(taskManagerProvider);
+
+  if (projectState.activeProjectId == null) {
+    return const ProjectTaskState();
+  }
+
+  return taskState.getProjectState(projectState.activeProjectId!);
 });
 
-class TaskNotifier extends StateNotifier<Task?> {
+class TaskManagerNotifier extends StateNotifier<TaskManagerState> {
   final WebSocketManager? webSocket;
   final bool isAuthenticated;
   StreamSubscription? _subscription;
-  
-  // Accumulators for streaming
-  String _thinkingBuffer = '';
-  String _textBuffer = '';
-  List<OutputChunk> _chunks = [];
-  List<ToolActivity> _activities = [];
-  String? _lastTool;
-  
-  TaskNotifier({
+
+  TaskManagerNotifier({
     required this.webSocket,
     required this.isAuthenticated,
-  }) : super(null) {
+  }) : super(const TaskManagerState()) {
     if (webSocket != null && isAuthenticated) {
       _subscribe();
     }
   }
-  
+
   void _subscribe() {
     _subscription = webSocket?.messageStream.listen(_handleMessage);
   }
-  
+
   void _handleMessage(WebSocketMessage msg) {
-    if (state == null && msg.type != 'auth_ok') return;
-    
+    final projectId = msg.projectId;
+
     switch (msg.type) {
+      case 'auth_ok':
+        // Handle active project IDs from reconnect
+        if (msg.activeProjectIds != null) {
+          state = state.copyWith(
+            streamingProjectIds: msg.activeProjectIds!.toSet(),
+          );
+          for (final id in msg.activeProjectIds!) {
+            if (id != '__global__') {
+              state = state.updateProject(id, (s) => s.copyWith(isStreaming: true));
+            }
+          }
+        }
+        break;
+
+      case 'streaming_restore':
+        if (projectId != null) {
+          state = state.updateProject(projectId, (s) => s.copyWith(
+            isStreaming: true,
+            thinkingBuffer: msg.thinking ?? s.thinkingBuffer,
+            textBuffer: msg.text ?? s.textBuffer,
+          ));
+        }
+        break;
+
       case 'thinking':
-        _thinkingBuffer += msg.text ?? '';
-        state = state?.copyWith(thinking: _thinkingBuffer);
+        if (projectId != null) {
+          state = state.updateProject(projectId, (s) {
+            final newThinking = s.thinkingBuffer + (msg.text ?? '');
+            return s.copyWith(
+              thinkingBuffer: newThinking,
+              currentTask: s.currentTask?.copyWith(thinking: newThinking),
+            );
+          });
+        }
         break;
-        
+
       case 'text':
-        final text = msg.text ?? '';
-        _textBuffer += text;
-        
-        // Detect if this should be a new chunk
-        final isNewChunk = _lastTool != null ||
-            text.startsWith('\n\n') ||
-            RegExp(r"^(Now|Next|Let me|I'll|First|Finally|Done)", caseSensitive: false)
-                .hasMatch(text.trim());
-        
-        if (isNewChunk && _chunks.isNotEmpty) {
-          // Start new chunk
-          _chunks = [
-            ..._chunks,
-            OutputChunk(
-              text: text,
-              timestamp: DateTime.now(),
-              afterTool: _lastTool,
-            ),
-          ];
-          _lastTool = null;
-        } else if (_chunks.isEmpty) {
-          // First chunk
-          _chunks = [
-            OutputChunk(
-              text: text,
-              timestamp: DateTime.now(),
-            ),
-          ];
-        } else {
-          // Append to last chunk
-          final lastChunk = _chunks.last;
-          _chunks = [
-            ..._chunks.take(_chunks.length - 1),
-            OutputChunk(
-              text: lastChunk.text + text,
-              timestamp: lastChunk.timestamp,
-              afterTool: lastChunk.afterTool,
-            ),
-          ];
+        if (projectId != null) {
+          state = state.updateProject(projectId, (s) {
+            final text = msg.text ?? '';
+            final newTextBuffer = s.textBuffer + text;
+
+            // Detect if this should be a new chunk
+            final isNewChunk = s.lastTool != null ||
+                text.startsWith('\n\n') ||
+                RegExp(r"^(Now|Next|Let me|I'll|First|Finally|Done)", caseSensitive: false)
+                    .hasMatch(text.trim());
+
+            List<OutputChunk> newChunks;
+            if (isNewChunk && s.chunks.isNotEmpty) {
+              newChunks = [
+                ...s.chunks,
+                OutputChunk(
+                  text: text,
+                  timestamp: DateTime.now(),
+                  afterTool: s.lastTool,
+                ),
+              ];
+            } else if (s.chunks.isEmpty) {
+              newChunks = [
+                OutputChunk(
+                  text: text,
+                  timestamp: DateTime.now(),
+                ),
+              ];
+            } else {
+              final lastChunk = s.chunks.last;
+              newChunks = [
+                ...s.chunks.take(s.chunks.length - 1),
+                OutputChunk(
+                  text: lastChunk.text + text,
+                  timestamp: lastChunk.timestamp,
+                  afterTool: lastChunk.afterTool,
+                ),
+              ];
+            }
+
+            return s.copyWith(
+              textBuffer: newTextBuffer,
+              chunks: newChunks,
+              lastTool: isNewChunk ? null : s.lastTool,
+              currentTask: s.currentTask?.copyWith(outputChunks: newChunks),
+            );
+          });
         }
-        
-        state = state?.copyWith(outputChunks: _chunks);
         break;
-        
+
       case 'tool_use':
-        if (msg.toolUse != null) {
-          final activity = ToolActivity.fromToolUse(msg.toolUse!);
-          _activities = [..._activities, activity];
-          _lastTool = activity.tool;
-          state = state?.copyWith(activities: _activities);
+        if (projectId != null && msg.toolUse != null) {
+          state = state.updateProject(projectId, (s) {
+            final activity = ToolActivity.fromToolUse(msg.toolUse!);
+            final newActivities = [...s.activities, activity];
+            return s.copyWith(
+              activities: newActivities,
+              lastTool: activity.tool,
+              currentTask: s.currentTask?.copyWith(activities: newActivities),
+            );
+          });
         }
         break;
-        
+
       case 'tool_result':
-        if (msg.toolResult != null) {
-          final activity = ToolActivity.fromToolResult(msg.toolResult!);
-          _activities = [..._activities, activity];
-          state = state?.copyWith(activities: _activities);
+        if (projectId != null && msg.toolResult != null) {
+          state = state.updateProject(projectId, (s) {
+            final activity = ToolActivity.fromToolResult(msg.toolResult!);
+            final newActivities = [...s.activities, activity];
+            return s.copyWith(
+              activities: newActivities,
+              currentTask: s.currentTask?.copyWith(activities: newActivities),
+            );
+          });
         }
         break;
-        
+
       case 'done':
-        state = state?.copyWith(
-          status: TaskStatus.completed,
-          completedAt: DateTime.now(),
-        );
-        _resetBuffers();
+        if (projectId != null) {
+          // Remove from streaming set
+          final newStreaming = Set<String>.from(state.streamingProjectIds);
+          newStreaming.remove(projectId);
+          state = state.copyWith(streamingProjectIds: newStreaming);
+
+          state = state.updateProject(projectId, (s) {
+            final completedTask = s.currentTask?.copyWith(
+              status: TaskStatus.completed,
+              completedAt: DateTime.now(),
+            );
+
+            return ProjectTaskState(
+              messages: completedTask != null ? [...s.messages, completedTask] : s.messages,
+              isStreaming: false,
+            );
+          });
+        }
         break;
-        
+
       case 'error':
-        state = state?.copyWith(
-          status: TaskStatus.error,
-          error: msg.error,
-          completedAt: DateTime.now(),
-        );
-        _resetBuffers();
+        if (projectId != null) {
+          final newStreaming = Set<String>.from(state.streamingProjectIds);
+          newStreaming.remove(projectId);
+          state = state.copyWith(streamingProjectIds: newStreaming);
+
+          state = state.updateProject(projectId, (s) {
+            final errorTask = s.currentTask?.copyWith(
+              status: TaskStatus.error,
+              error: msg.error,
+              completedAt: DateTime.now(),
+            );
+
+            return ProjectTaskState(
+              messages: errorTask != null ? [...s.messages, errorTask] : s.messages,
+              isStreaming: false,
+            );
+          });
+        }
         break;
     }
   }
-  
-  Future<void> sendTask(String prompt) async {
+
+  Future<void> sendTask(String projectId, String prompt) async {
     if (webSocket == null) {
       throw StateError('Not connected');
     }
-    
-    _resetBuffers();
-    
-    state = Task(
+
+    final task = Task(
       prompt: prompt,
       status: TaskStatus.running,
       startedAt: DateTime.now(),
     );
-    
-    await webSocket!.sendMessage(prompt);
+
+    // Add to streaming set
+    final newStreaming = Set<String>.from(state.streamingProjectIds);
+    newStreaming.add(projectId);
+    state = state.copyWith(streamingProjectIds: newStreaming);
+
+    // Initialize project state with new task
+    state = state.updateProject(projectId, (s) => ProjectTaskState(
+      messages: [...s.messages, Task(prompt: prompt, startedAt: DateTime.now())],
+      currentTask: task,
+      isStreaming: true,
+    ));
+
+    await webSocket!.sendMessage(prompt, projectId: projectId);
   }
-  
-  Future<void> cancel() async {
-    if (webSocket == null || state == null) return;
-    
-    await webSocket!.cancel();
-    state = state?.copyWith(
-      status: TaskStatus.cancelled,
-      completedAt: DateTime.now(),
-    );
-    _resetBuffers();
+
+  Future<void> cancel(String projectId) async {
+    if (webSocket == null) return;
+
+    await webSocket!.cancel(projectId: projectId);
+
+    final newStreaming = Set<String>.from(state.streamingProjectIds);
+    newStreaming.remove(projectId);
+    state = state.copyWith(streamingProjectIds: newStreaming);
+
+    state = state.updateProject(projectId, (s) {
+      final cancelledTask = s.currentTask?.copyWith(
+        status: TaskStatus.cancelled,
+        completedAt: DateTime.now(),
+      );
+
+      return ProjectTaskState(
+        messages: cancelledTask != null ? [...s.messages, cancelledTask] : s.messages,
+        isStreaming: false,
+      );
+    });
   }
-  
-  void _resetBuffers() {
-    _thinkingBuffer = '';
-    _textBuffer = '';
-    _chunks = [];
-    _activities = [];
-    _lastTool = null;
-  }
-  
+
   @override
   void dispose() {
     _subscription?.cancel();
     super.dispose();
-  }
-}
-
-class TaskHistoryNotifier extends StateNotifier<List<Task>> {
-  TaskHistoryNotifier() : super([]);
-  
-  void addTask(Task task) {
-    state = [task, ...state];
-  }
-  
-  void clearHistory() {
-    state = [];
   }
 }

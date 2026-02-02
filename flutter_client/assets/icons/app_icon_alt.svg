@@ -1,0 +1,25 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#D97757"/>
+      <stop offset="100%" style="stop-color:#C4644A"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded square - terracotta -->
+  <rect x="0" y="0" width="1024" height="1024" rx="224" ry="224" fill="url(#bg2)"/>
+
+  <!-- Tunnel/portal symbol - concentric rounded rects suggesting depth -->
+  <rect x="192" y="288" width="640" height="448" rx="96" ry="96"
+        fill="none" stroke="#FFF8F4" stroke-width="48" opacity="0.3"/>
+
+  <rect x="288" y="368" width="448" height="288" rx="64" ry="64"
+        fill="none" stroke="#FFF8F4" stroke-width="48" opacity="0.5"/>
+
+  <rect x="368" y="432" width="288" height="160" rx="48" ry="48"
+        fill="none" stroke="#FFF8F4" stroke-width="48" opacity="0.7"/>
+
+  <!-- Inner solid - the "opening" -->
+  <rect x="432" y="480" width="160" height="64" rx="32" ry="32"
+        fill="#FFF8F4"/>
+</svg>
