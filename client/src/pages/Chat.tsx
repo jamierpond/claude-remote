@@ -379,7 +379,7 @@ export default function Chat({ token }: Props) {
     pairingStarted.current = true;
 
     console.log('Fetching server public key...');
-    const getRes = await fetch(`/api/pair/${token}`);
+    const getRes = await fetch(`/pair/${token}`);
     if (!getRes.ok) {
       const data = await getRes.json().catch(() => ({}));
       const msg = `FATAL: Failed to get server key: ${data.error || getRes.status}`;
@@ -403,7 +403,7 @@ export default function Chat({ token }: Props) {
     const clientPublicKey = await exportPublicKey(keyPair.publicKey);
     const privateKeyJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey);
 
-    const postRes = await fetch(`/api/pair/${token}`, {
+    const postRes = await fetch(`/pair/${token}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ clientPublicKey }),
