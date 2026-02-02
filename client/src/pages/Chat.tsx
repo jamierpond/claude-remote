@@ -179,8 +179,8 @@ export default function Chat({ token }: Props) {
       localStorage.setItem('claude-remote-private-key', JSON.stringify(privateKeyJwk));
       localStorage.setItem('claude-remote-server-public-key', serverPublicKey);
 
-      sharedKeyRef.current = sharedKey;
-      setView('pin');
+      // Hard redirect to avoid React strict mode issues
+      window.location.href = '/chat';
     } catch (err) {
       setError(`Pairing failed: ${err}`);
     }
