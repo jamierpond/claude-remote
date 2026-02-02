@@ -26,8 +26,11 @@
 
             # Flutter
             flutter
-
-            # Flutter dependencies (Linux)
+          ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            # Flutter Linux desktop dependencies
+            clang
+            cmake
+            ninja
             pkg-config
             gtk3
             pcre2
@@ -40,10 +43,6 @@
             lerc
             libxkbcommon
             libepoxy
-          ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-            clang
-            cmake
-            ninja
           ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
             cocoapods
           ];
