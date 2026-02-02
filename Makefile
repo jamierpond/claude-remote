@@ -7,12 +7,12 @@ install:
 
 # Run server + Flutter web client (with hot reload)
 # Server: tsx --watch auto-restarts on .ts file changes
-# Flutter: flutter run -d web-server with hot reload on port 5173
+# Flutter: flutter run -d web-server on port 5173, use `make reload` for hot reload
 dev:
 	@mkdir -p logs
 	@echo "Starting server and Flutter web client..."
 	@(pnpm tsx --watch server.ts 2>&1 | tee logs/server.log) & \
-	(cd flutter_client && flutter run -d web-server --web-port=5173 2>&1 | tee ../logs/flutter.log)
+	(cd flutter_client && flutter run -d web-server --web-port=5173 --pid-file=../logs/flutter.pid 2>&1 | tee ../logs/flutter.log)
 
 # Run both server and React web client (with hot reload)
 # Server: tsx --watch auto-restarts on .ts file changes
@@ -42,12 +42,11 @@ start:
 
 # Trigger reload for all dev processes
 # - Touches server.ts to trigger tsx --watch restart
-# - Sends 'r' to Flutter process if running (hot reload)
+# - Sends SIGUSR1 to Flutter process for hot reload
 reload:
 	@echo "Triggering reload..."
 	@touch server.ts
-	@# Send hot reload signal to Flutter if running
-	@pkill -USR1 -f "flutter.*run" 2>/dev/null || true
+	@if [ -f logs/flutter.pid ]; then kill -USR1 $$(cat logs/flutter.pid) 2>/dev/null || true; fi
 	@echo "Done"
 
 # Kill all dev processes
@@ -55,6 +54,7 @@ kill:
 	@echo "Killing dev processes..."
 	@pkill -f "tsx.*server.ts" 2>/dev/null || true
 	@pkill -f "vite" 2>/dev/null || true
+	@if [ -f logs/flutter.pid ]; then kill $$(cat logs/flutter.pid) 2>/dev/null || true; rm -f logs/flutter.pid; fi
 	@pkill -f "flutter.*run" 2>/dev/null || true
 	@echo "Done"
 
