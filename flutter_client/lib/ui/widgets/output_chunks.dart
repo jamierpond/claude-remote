@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../../models/task.dart';
 import '../theme/colors.dart';
 import '../theme/spacing.dart';
+import '../theme/typography.dart';
 
 class OutputChunks extends StatelessWidget {
   final List<OutputChunk> chunks;
@@ -120,10 +121,9 @@ class _ChunkCard extends StatelessWidget {
                 children: [
                   Text(
                     timeFormat.format(chunk.timestamp),
-                    style: const TextStyle(
-                      color: AppColors.textMuted,
+                    style: AppTypography.mono(
                       fontSize: 10,
-                      fontFamily: 'SF Mono',
+                      color: AppColors.textMuted,
                     ),
                   ),
                 ],

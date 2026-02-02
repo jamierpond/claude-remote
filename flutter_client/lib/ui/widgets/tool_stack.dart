@@ -3,6 +3,7 @@ import 'package:pretty_diff_text/pretty_diff_text.dart';
 import '../../models/tool_activity.dart';
 import '../theme/colors.dart';
 import '../theme/spacing.dart';
+import '../theme/typography.dart';
 
 /// Paired tool use + result
 class ToolPair {
@@ -346,10 +347,9 @@ class _ToolCardState extends State<ToolCard> {
                   // Time
                   Text(
                     _timeAgo,
-                    style: const TextStyle(
-                      color: AppColors.textMuted,
+                    style: AppTypography.mono(
                       fontSize: 10,
-                      fontFamily: 'SF Mono',
+                      color: AppColors.textMuted,
                     ),
                   ),
                 ],
@@ -480,8 +480,7 @@ class _ToolCardState extends State<ToolCard> {
         ),
         child: Text(
           widget.pair.error!,
-          style: const TextStyle(
-            fontFamily: 'SF Mono',
+          style: AppTypography.mono(
             fontSize: 11,
             color: AppColors.error,
           ),
@@ -502,8 +501,7 @@ class _ToolCardState extends State<ToolCard> {
       ),
       child: Text(
         preview,
-        style: const TextStyle(
-          fontFamily: 'SF Mono',
+        style: AppTypography.mono(
           fontSize: 11,
           color: AppColors.textSecondary,
         ),
@@ -534,8 +532,7 @@ class _ToolCardState extends State<ToolCard> {
           ],
           Text(
             text,
-            style: const TextStyle(
-              fontFamily: 'SF Mono',
+            style: AppTypography.mono(
               fontSize: 11,
               color: AppColors.textPrimary,
             ),
@@ -561,22 +558,19 @@ class _ToolCardState extends State<ToolCard> {
       child: PrettyDiffText(
         oldText: oldPreview,
         newText: newPreview,
-        defaultTextStyle: const TextStyle(
-          fontFamily: 'SF Mono',
+        defaultTextStyle: AppTypography.mono(
           fontSize: 11,
           color: AppColors.textPrimary,
         ),
-        addedTextStyle: const TextStyle(
-          fontFamily: 'SF Mono',
+        addedTextStyle: AppTypography.mono(
           fontSize: 11,
           color: AppColors.success,
-          backgroundColor: Color(0x205AAD6A),
+          backgroundColor: const Color(0x205AAD6A),
         ),
-        deletedTextStyle: const TextStyle(
-          fontFamily: 'SF Mono',
+        deletedTextStyle: AppTypography.mono(
           fontSize: 11,
           color: AppColors.error,
-          backgroundColor: Color(0x20E85A5A),
+          backgroundColor: const Color(0x20E85A5A),
           decoration: TextDecoration.lineThrough,
         ),
       ),

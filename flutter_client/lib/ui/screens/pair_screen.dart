@@ -6,6 +6,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../providers/auth_provider.dart';
 import '../theme/colors.dart';
 import '../theme/spacing.dart';
+import '../theme/typography.dart';
 
 class PairScreen extends ConsumerStatefulWidget {
   final String? token;
@@ -155,7 +156,7 @@ class _PairScreenState extends ConsumerState<PairScreen> {
                   children: [
                     const Text('ERROR', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: AppColors.textOnPrimary)),
                     AppSpacing.gapVerticalSm,
-                    SelectableText(_error!, style: const TextStyle(fontFamily: 'SF Mono', color: AppColors.textOnPrimary)),
+                    SelectableText(_error!, style: AppTypography.mono(color: AppColors.textOnPrimary)),
                   ],
                 ),
               ),
@@ -209,7 +210,7 @@ class _PairScreenState extends ConsumerState<PairScreen> {
                               Expanded(
                                 child: TextField(
                                   controller: _urlController,
-                                  style: const TextStyle(fontFamily: 'SF Mono', fontSize: 13, color: AppColors.textPrimary),
+                                  style: AppTypography.mono(fontSize: 13, color: AppColors.textPrimary),
                                   decoration: InputDecoration(
                                     hintText: 'https://ai.pond.audio/pair/...',
                                     hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
@@ -300,7 +301,7 @@ class _PairScreenState extends ConsumerState<PairScreen> {
                                 AppSpacing.gapVerticalSm,
                                 SelectableText(
                                   _log.isEmpty ? '(empty)' : _log,
-                                  style: const TextStyle(fontFamily: 'SF Mono', fontSize: 11, color: AppColors.success),
+                                  style: AppTypography.mono(fontSize: 11, color: AppColors.success),
                                 ),
                               ],
                             ),
@@ -341,7 +342,7 @@ class _PairScreenState extends ConsumerState<PairScreen> {
         children: [
           Text(label, style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
           AppSpacing.gapVerticalXs,
-          SelectableText(value, style: const TextStyle(fontFamily: 'SF Mono', fontSize: 14, color: AppColors.textPrimary)),
+          SelectableText(value, style: AppTypography.mono(fontSize: 14, color: AppColors.textPrimary)),
         ],
       ),
     );

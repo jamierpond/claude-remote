@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/task.dart';
 import '../theme/colors.dart';
 import '../theme/spacing.dart';
+import '../theme/typography.dart';
 
 class TaskHeader extends StatefulWidget {
   final Task task;
@@ -137,10 +138,9 @@ class _TaskHeaderState extends State<TaskHeader> {
           // Elapsed time
           Text(
             _formatDuration(task.elapsed),
-            style: const TextStyle(
-              color: AppColors.textMuted,
+            style: AppTypography.mono(
               fontSize: 12,
-              fontFamily: 'SF Mono',
+              color: AppColors.textMuted,
             ),
           ),
 
