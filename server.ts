@@ -171,6 +171,18 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     }
 
     reloadState();
+
+    // Log new pair URL
+    if (serverState.pairingToken) {
+      const clientPort = process.env.NODE_ENV === 'production' ? port : 5173;
+      const pairUrl = `http://localhost:${clientPort}/pair/${serverState.pairingToken}`;
+      console.log('');
+      console.log('> Unpaired! New pair URL:');
+      console.log(`> ${pairUrl}`);
+      console.log('');
+      qrcode.generate(pairUrl, { small: true });
+    }
+
     return json(res, { success: true });
   }
 
@@ -295,7 +307,9 @@ async function main() {
       console.log('');
       qrcode.generate(pairUrl, { small: true });
     } else {
+      const clientPort = process.env.NODE_ENV === 'production' ? port : 5173;
       console.log('> Device already paired');
+      console.log(`> Go to http://localhost:${clientPort} to chat or unpair`);
     }
   });
 }

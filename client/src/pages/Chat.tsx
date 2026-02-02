@@ -119,19 +119,30 @@ export default function Chat({ token }: Props) {
   }, [messages, currentThinking, currentResponse]);
 
   useEffect(() => {
-    const stored = localStorage.getItem('claude-remote-paired');
-    if (stored) {
-      setView('pin');
-    } else if (!token) {
-      // No localStorage and no token - can't proceed
-      setError('Not paired. Go to home page to scan QR code.');
+    if (token) {
+      // New pairing - clear old credentials first
+      localStorage.removeItem('claude-remote-paired');
+      localStorage.removeItem('claude-remote-device-id');
+      localStorage.removeItem('claude-remote-private-key');
+      localStorage.removeItem('claude-remote-server-public-key');
+      // Stay in 'pairing' view, completePairing will run
+    } else {
+      const stored = localStorage.getItem('claude-remote-paired');
+      if (stored) {
+        setView('pin');
+      } else {
+        setError('Not paired. Go to home page to scan QR code.');
+      }
     }
   }, [token]);
 
+  const pairingStarted = useRef(false);
+
   const completePairing = useCallback(async () => {
-    if (!token) {
+    if (!token || pairingStarted.current) {
       return;
     }
+    pairingStarted.current = true;
 
     try {
       const getRes = await fetch(`/api/pair/${token}`);
