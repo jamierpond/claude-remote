@@ -31,6 +31,7 @@ export interface Message {
 
 export interface Conversation {
   messages: Message[];
+  claudeSessionId: string | null;
   updatedAt: string;
 }
 
