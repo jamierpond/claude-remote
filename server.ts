@@ -86,13 +86,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     return;
   }
 
-  // API: Status (does NOT expose pairing token - that's only in server logs)
+  // API: Status - includes pairing URL when not paired
   if (pathname === '/api/status' && method === 'GET') {
     reloadState();
+    const clientPort = process.env.NODE_ENV === 'production' ? port : 5173;
     return json(res, {
       paired: !!device,
       deviceId: device?.id || null,
       pairedAt: device?.createdAt || null,
+      pairingUrl: serverState.pairingToken ? `http://localhost:${clientPort}/pair/${serverState.pairingToken}` : null,
     });
   }
 
@@ -255,39 +257,68 @@ async function main() {
         return;
       }
 
+      let encrypted: EncryptedData;
       try {
-        const encrypted: EncryptedData = JSON.parse(raw.toString());
-        const decrypted = decrypt(encrypted, device.sharedSecret);
-        const msg = JSON.parse(decrypted);
-
-        if (msg.type === 'auth') {
-          const valid = await verifyPin(msg.pin, pinHash);
-          if (valid) {
-            authenticated = true;
-            sendEncrypted({ type: 'auth_ok' });
-          } else {
-            sendEncrypted({ type: 'auth_error', error: 'Invalid PIN' });
-          }
-        } else if (msg.type === 'message') {
-          if (!authenticated) {
-            sendEncrypted({ type: 'error', error: 'Not authenticated' });
-            return;
-          }
-
-          abortController = new AbortController();
-
-          spawnClaude(msg.text, (event: ClaudeEvent) => {
-            sendEncrypted(event);
-          }, abortController.signal);
-        } else if (msg.type === 'cancel') {
-          if (abortController) {
-            abortController.abort();
-            abortController = null;
-          }
-        }
+        encrypted = JSON.parse(raw.toString());
       } catch (err) {
-        console.error('WebSocket message error:', err);
-        sendEncrypted({ type: 'error', error: 'Invalid message' });
+        console.error('FATAL: Failed to parse WebSocket message as JSON:', err);
+        console.error('Raw message:', raw.toString().substring(0, 200));
+        ws.close(4002, 'Invalid JSON');
+        return;
+      }
+
+      let decrypted: string;
+      try {
+        decrypted = decrypt(encrypted, device.sharedSecret);
+      } catch (err) {
+        console.error('FATAL: Decryption failed - crypto keys mismatched. Client needs to re-pair.');
+        console.error('Error:', err);
+        ws.close(4003, 'Decryption failed - re-pair required');
+        return;
+      }
+
+      let msg: { type: string; pin?: string; text?: string };
+      try {
+        msg = JSON.parse(decrypted);
+      } catch (err) {
+        console.error('FATAL: Failed to parse decrypted message as JSON:', err);
+        ws.close(4004, 'Invalid message format');
+        return;
+      }
+
+      console.log('Received message type:', msg.type);
+
+      if (msg.type === 'auth') {
+        const valid = await verifyPin(msg.pin || '', pinHash);
+        if (valid) {
+          authenticated = true;
+          console.log('Auth successful');
+          sendEncrypted({ type: 'auth_ok' });
+        } else {
+          console.log('Auth failed - invalid PIN');
+          sendEncrypted({ type: 'auth_error', error: 'Invalid PIN' });
+        }
+      } else if (msg.type === 'message') {
+        if (!authenticated) {
+          console.log('Message rejected - not authenticated');
+          sendEncrypted({ type: 'error', error: 'Not authenticated' });
+          return;
+        }
+
+        console.log('Processing message:', msg.text?.substring(0, 50));
+        abortController = new AbortController();
+
+        spawnClaude(msg.text || '', (event: ClaudeEvent) => {
+          sendEncrypted(event);
+        }, abortController.signal);
+      } else if (msg.type === 'cancel') {
+        console.log('Cancel requested');
+        if (abortController) {
+          abortController.abort();
+          abortController = null;
+        }
+      } else {
+        console.log('Unknown message type:', msg.type);
       }
     });
 

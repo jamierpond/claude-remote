@@ -8,6 +8,7 @@ interface Status {
   paired: boolean;
   deviceId: string | null;
   pairedAt: string | null;
+  pairingUrl: string | null;
 }
 
 export default function Home({ onNavigate }: Props) {
@@ -69,6 +70,20 @@ export default function Home({ onNavigate }: Props) {
     );
   }
 
+  const handleForceRepair = async () => {
+    // Clear both sides and re-pair
+    setUnpairing(true);
+    try {
+      await fetch('/api/unpair', { method: 'POST' });
+      localStorage.clear(); // Clear everything to be safe
+      window.location.reload();
+    } catch {
+      setError('Failed to reset');
+    } finally {
+      setUnpairing(false);
+    }
+  };
+
   if (status.paired) {
     const hasBrowserCredentials = !!localStorage.getItem('claude-remote-paired');
 
@@ -76,20 +91,17 @@ export default function Home({ onNavigate }: Props) {
       return (
         <main className="min-h-screen flex flex-col items-center justify-center bg-gray-900 text-white p-4">
           <div className="text-center">
-            <div className="text-6xl mb-4">&#x26A0;</div>
-            <h1 className="text-2xl font-bold mb-2">Paired to Different Device</h1>
+            <div className="text-6xl mb-4">!</div>
+            <h1 className="text-2xl font-bold mb-2">Crypto Mismatch</h1>
             <p className="text-gray-400 mb-4">
-              Server is paired, but this browser doesn't have the credentials.
-            </p>
-            <p className="text-sm text-gray-500 mb-6">
-              Unpair to get a new pairing URL in the server logs.
+              Server is paired but this browser has no/wrong credentials.
             </p>
             <button
-              onClick={handleUnpair}
+              onClick={handleForceRepair}
               disabled={unpairing}
               className="px-6 py-3 bg-red-600 rounded-lg font-semibold hover:bg-red-700 transition-colors disabled:opacity-50"
             >
-              {unpairing ? 'Unpairing...' : 'Unpair & Reset'}
+              {unpairing ? 'Resetting...' : 'Reset & Re-pair'}
             </button>
           </div>
         </main>
@@ -99,26 +111,22 @@ export default function Home({ onNavigate }: Props) {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center bg-gray-900 text-white p-4">
         <div className="text-center">
-          <div className="text-6xl mb-4">&#x2713;</div>
-          <h1 className="text-2xl font-bold mb-2">Device Paired</h1>
-          <p className="text-gray-400 mb-4">Your device is connected and ready.</p>
-          <p className="text-sm text-gray-500">Device ID: {status.deviceId}</p>
-          <p className="text-sm text-gray-500 mb-6">
-            Paired: {status.pairedAt ? new Date(status.pairedAt).toLocaleDateString() : 'Unknown'}
-          </p>
+          <h1 className="text-2xl font-bold mb-2">Claude Remote</h1>
+          <p className="text-gray-400 mb-4">Device paired and ready.</p>
+          <p className="text-sm text-gray-500 mb-6">ID: {status.deviceId}</p>
           <div className="flex flex-col gap-3">
-            <button
-              onClick={() => onNavigate('chat')}
-              className="px-6 py-3 bg-blue-600 rounded-lg font-semibold hover:bg-blue-700 transition-colors"
+            <a
+              href="/chat"
+              className="px-6 py-3 bg-blue-600 rounded-lg font-semibold hover:bg-blue-700 transition-colors text-center"
             >
               Open Chat
-            </button>
+            </a>
             <button
-              onClick={handleUnpair}
+              onClick={handleForceRepair}
               disabled={unpairing}
               className="px-6 py-3 bg-gray-700 rounded-lg font-semibold hover:bg-gray-600 transition-colors disabled:opacity-50"
             >
-              {unpairing ? 'Unpairing...' : 'Unpair Device'}
+              {unpairing ? 'Resetting...' : 'Reset & Re-pair'}
             </button>
           </div>
         </div>
@@ -126,17 +134,22 @@ export default function Home({ onNavigate }: Props) {
     );
   }
 
-  // Not paired - tell user to check server logs
+  // Not paired - show pairing link directly
   return (
     <main className="min-h-screen flex flex-col items-center justify-center bg-gray-900 text-white p-4">
       <div className="text-center">
         <h1 className="text-2xl font-bold mb-2">Claude Remote</h1>
-        <p className="text-gray-400 mb-6">
-          Check server logs for the pairing URL or QR code.
-        </p>
-        <p className="text-sm text-gray-500">
-          Waiting for pairing...
-        </p>
+        <p className="text-gray-400 mb-6">Not paired yet.</p>
+        {status.pairingUrl ? (
+          <a
+            href={status.pairingUrl}
+            className="px-6 py-3 bg-blue-600 rounded-lg font-semibold hover:bg-blue-700 transition-colors inline-block"
+          >
+            Click to Pair
+          </a>
+        ) : (
+          <p className="text-red-400">No pairing URL available - restart server</p>
+        )}
       </div>
     </main>
   );
