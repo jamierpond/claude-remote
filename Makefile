@@ -42,12 +42,12 @@ start:
 
 # Trigger reload for all dev processes
 # - Touches server.ts to trigger tsx --watch restart
-# - Sends SIGUSR1 to Flutter process for hot reload
+# - Sends SIGUSR2 to Flutter process for hot restart (rebuilds app)
 reload:
 	@echo "Triggering reload..."
 	@touch server.ts
-	@if [ -f logs/flutter.pid ]; then kill -USR1 $$(cat logs/flutter.pid) 2>/dev/null || true; fi
-	@echo "Done"
+	@if [ -f logs/flutter.pid ]; then kill -USR2 $$(cat logs/flutter.pid) 2>/dev/null || true; fi
+	@echo "Done - refresh browser to see Flutter changes"
 
 # Kill all dev processes
 kill:
