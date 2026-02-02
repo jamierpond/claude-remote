@@ -18,7 +18,7 @@ run:
 
 # iOS development (physical device)
 ios:
-	flutter run -d pond
+	flutter run -d pond -v
 
 ios-sim:
 	flutter run -d "iPhone"
