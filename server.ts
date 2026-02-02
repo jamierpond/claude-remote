@@ -259,7 +259,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       paired: devices.length > 0,
       devices: devices.map(d => ({ id: d.id, createdAt: d.createdAt })),
       deviceCount: devices.length,
-      pairingUrl: serverState.pairingToken ? `${serverUrl}/api/pair/${serverState.pairingToken}` : null,
+      pairingUrl: serverState.pairingToken ? `${serverUrl}/pair/${serverState.pairingToken}` : null,
     });
   }
 
@@ -445,9 +445,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   }
 
   // API: Pair GET - get server public key
-  if (pathname?.startsWith('/api/pair/') && method === 'GET') {
+  if (pathname?.startsWith('/pair/') && method === 'GET') {
     reloadState();
-    const token = pathname.split('/api/pair/')[1];
+    const token = pathname.split('/pair/')[1];
 
     if (!serverState || serverState.pairingToken !== token) {
       return json(res, { error: 'Invalid token' }, 400);
@@ -457,9 +457,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   }
 
   // API: Pair POST - complete pairing (allows multiple devices)
-  if (pathname?.startsWith('/api/pair/') && method === 'POST') {
+  if (pathname?.startsWith('/pair/') && method === 'POST') {
     reloadState();
-    const token = pathname.split('/api/pair/')[1];
+    const token = pathname.split('/pair/')[1];
 
     if (!serverState || serverState.pairingToken !== token) {
       return json(res, { error: 'Invalid token' }, 400);
@@ -913,7 +913,7 @@ async function main() {
     console.log(`> Client URL: ${clientUrl}`);
     console.log(`> Paired devices: ${devices.length}`);
     if (serverState.pairingToken) {
-      const pairUrl = `${serverUrl}/api/pair/${serverState.pairingToken}`;
+      const pairUrl = `${serverUrl}/pair/${serverState.pairingToken}`;
       console.log(`> Pair URL: ${pairUrl}`);
       console.log('');
       qrcode.generate(pairUrl, { small: true });

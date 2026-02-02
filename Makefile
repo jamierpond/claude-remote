@@ -1,4 +1,4 @@
-.PHONY: dev dev-server dev-client dev-vite dev-flutter-client build start stop restart status logs logs-server logs-client deps install clean reload kill dev-restart
+.PHONY: dev dev-server dev-client dev-flutter dev-flutter-client build start stop restart status logs logs-server logs-client deps install clean reload kill dev-restart
 
 # Install dependencies only
 deps:
@@ -18,20 +18,19 @@ install: deps
 	@echo "Daemon installed and running. Logs: logs/daemon-server.log"
 	@echo "Run 'sudo loginctl enable-linger $(USER)' to keep it running when logged out."
 
+# Run Vite client only (server runs as daemon)
+# Client: Vite HMR auto-updates on save
+dev:
+	pnpm vite
+
 # Run server + Flutter web client (with hot reload)
 # Server: tsx --watch auto-restarts on .ts file changes
 # Flutter: flutter run -d web-server on port 5173, use `make reload` for hot reload
-dev:
+dev-flutter:
 	@mkdir -p logs
 	@echo "Starting server and Flutter web client..."
 	@(pnpm tsx --watch server.ts 2>&1 | tee logs/server.log) & \
 	(cd flutter_client && flutter run -d web-server --web-port=5173 --pid-file=../logs/flutter.pid 2>&1 | tee ../logs/flutter.log)
-
-# Run both server and React web client (with hot reload)
-# Server: tsx --watch auto-restarts on .ts file changes
-# Client: Vite HMR auto-updates on save
-dev-vite:
-	pnpm dev
 
 # Run server only (with watch mode)
 dev-server:
