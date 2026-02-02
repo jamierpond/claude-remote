@@ -267,18 +267,18 @@ async function main() {
   wss.on('connection', (ws: WebSocket) => {
     let authenticated = false;
     let abortController: AbortController | null = null;
+    let currentDevice: Device | null = null;
 
     const sendEncrypted = (data: object) => {
-      reloadState();
-      if (!device) return;
-      const encrypted = encrypt(JSON.stringify(data), device.sharedSecret);
+      if (!currentDevice) return;
+      const encrypted = encrypt(JSON.stringify(data), currentDevice.sharedSecret);
       ws.send(JSON.stringify(encrypted));
     };
 
     ws.on('message', async (raw: Buffer) => {
       reloadState();
-      if (!device) {
-        ws.close(4001, 'No device paired');
+      if (devices.length === 0) {
+        ws.close(4001, 'No devices paired');
         return;
       }
 
@@ -292,9 +292,23 @@ async function main() {
         return;
       }
 
+      // Find device by trying decryption with each device's key
+      if (!currentDevice) {
+        currentDevice = findDeviceByDecryption(encrypted);
+        if (currentDevice) {
+          console.log(`Device identified: ${currentDevice.id}`);
+        }
+      }
+
+      if (!currentDevice) {
+        console.error('FATAL: No device could decrypt message - client needs to re-pair');
+        ws.close(4003, 'Decryption failed - re-pair required');
+        return;
+      }
+
       let decrypted: string;
       try {
-        decrypted = decrypt(encrypted, device.sharedSecret);
+        decrypted = decrypt(encrypted, currentDevice.sharedSecret);
       } catch (err) {
         console.error('FATAL: Decryption failed - crypto keys mismatched. Client needs to re-pair.');
         console.error('Error:', err);
@@ -311,7 +325,7 @@ async function main() {
         return;
       }
 
-      console.log('Received message type:', msg.type);
+      console.log(`[${currentDevice.id}] Received message type:`, msg.type);
 
       if (msg.type === 'auth') {
         const valid = await verifyPin(msg.pin || '', pinHash);
