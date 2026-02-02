@@ -160,10 +160,35 @@ class TaskManagerNotifier extends StateNotifier<TaskManagerState> {
 
       case 'streaming_restore':
         if (projectId != null) {
+          // Parse activity from restore message
+          List<ToolActivity> restoredActivities = [];
+          if (msg.activity != null) {
+            for (final item in msg.activity!) {
+              if (item is Map<String, dynamic>) {
+                restoredActivities.add(ToolActivity.fromJson(item));
+              }
+            }
+          }
+
+          // Create a task to display the restored state
+          final restoredTask = Task(
+            id: 'restored-${DateTime.now().millisecondsSinceEpoch}',
+            prompt: '[Restored session]',
+            status: TaskStatus.running,
+            startedAt: DateTime.now(),
+            thinking: msg.thinking ?? '',
+            outputChunks: msg.text != null && msg.text!.isNotEmpty
+                ? [OutputChunk(text: msg.text!, timestamp: DateTime.now())]
+                : [],
+            activity: restoredActivities,
+          );
+
           state = state.updateProject(projectId, (s) => s.copyWith(
             isStreaming: true,
-            thinkingBuffer: msg.thinking ?? s.thinkingBuffer,
-            textBuffer: msg.text ?? s.textBuffer,
+            currentTask: restoredTask,
+            thinkingBuffer: msg.thinking ?? '',
+            textBuffer: msg.text ?? '',
+            activities: restoredActivities,
           ));
         }
         break;
@@ -334,10 +359,8 @@ class TaskManagerNotifier extends StateNotifier<TaskManagerState> {
   }
 
   Future<void> cancel(String projectId) async {
-    if (webSocket == null) return;
-
-    await webSocket!.cancel(projectId: projectId);
-
+    // ALWAYS update UI state first (optimistic update)
+    // This ensures cancel always "works" from the user's perspective
     final newStreaming = Set<String>.from(state.streamingProjectIds);
     newStreaming.remove(projectId);
     state = state.copyWith(streamingProjectIds: newStreaming);
@@ -353,6 +376,15 @@ class TaskManagerNotifier extends StateNotifier<TaskManagerState> {
         isStreaming: false,
       );
     });
+
+    // Then try to cancel on server (best effort)
+    try {
+      if (webSocket != null) {
+        await webSocket!.cancel(projectId: projectId);
+      }
+    } catch (e) {
+      debugPrint('[cancel] WebSocket cancel failed: $e');
+    }
   }
 
   /// Fetches conversation history for a project from the server

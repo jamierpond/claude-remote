@@ -156,7 +156,25 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
   Future<void> _cancel() async {
     final projectId = ref.read(projectProvider).activeProjectId;
     if (projectId == null) return;
-    await ref.read(taskManagerProvider.notifier).cancel(projectId);
+
+    // Update UI immediately via provider (optimistic cancel)
+    // This ensures the UI always responds, even if network fails
+    ref.read(taskManagerProvider.notifier).cancel(projectId);
+
+    // Also send HTTP cancel to server (more reliable than WebSocket)
+    // Don't await - fire and forget for responsiveness
+    final authState = ref.read(authStateProvider);
+    final serverUrl = authState.serverUrl;
+    if (serverUrl != null) {
+      var apiUrl = serverUrl;
+      if (serverUrl.contains('ai.pond.audio')) {
+        apiUrl = serverUrl.replaceFirst('ai.pond.audio', 'ai-server.pond.audio');
+      }
+      http.post(
+        Uri.parse('$apiUrl/api/projects/${Uri.encodeComponent(projectId)}/cancel'),
+      ).then((_) => print('[cancel] HTTP cancel sent'))
+       .catchError((e) => print('[cancel] HTTP cancel failed: $e'));
+    }
   }
 
   @override

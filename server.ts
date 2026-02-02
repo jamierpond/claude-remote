@@ -368,6 +368,25 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     });
   }
 
+  // API: Cancel task for a project (HTTP fallback for unreliable WebSocket)
+  if (pathname?.startsWith('/api/projects/') && pathname.endsWith('/cancel') && method === 'POST') {
+    const projectId = decodeURIComponent(pathname.split('/api/projects/')[1].replace('/cancel', ''));
+    console.log(`[api] HTTP cancel requested for project: ${projectId}`);
+
+    // Find and abort all active jobs for this project (any device)
+    let cancelled = 0;
+    for (const [key, controller] of activeJobs.entries()) {
+      if (key.endsWith(`:${projectId}`)) {
+        console.log(`[api] Aborting job: ${key}`);
+        controller.abort();
+        activeJobs.delete(key);
+        cancelled++;
+      }
+    }
+
+    return json(res, { ok: true, cancelled });
+  }
+
   // API: Get git status for a project
   if (pathname?.startsWith('/api/projects/') && pathname.endsWith('/git') && method === 'GET') {
     const projectId = decodeURIComponent(pathname.split('/api/projects/')[1].replace('/git', ''));
