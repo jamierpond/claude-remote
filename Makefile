@@ -9,12 +9,13 @@ deps:
 install: deps
 	@echo "Installing systemd service..."
 	@mkdir -p ~/.config/systemd/user
+	@mkdir -p logs
 	@cp claude-remote.service ~/.config/systemd/user/
 	@systemctl --user daemon-reload
 	@systemctl --user enable claude-remote
 	@systemctl --user restart claude-remote
 	@echo ""
-	@echo "Daemon installed and running."
+	@echo "Daemon installed and running. Logs: logs/daemon-server.log"
 	@echo "Run 'sudo loginctl enable-linger $(USER)' to keep it running when logged out."
 
 # Run server + Flutter web client (with hot reload)
