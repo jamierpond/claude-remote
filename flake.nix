@@ -41,12 +41,10 @@
             libxkbcommon
             libepoxy
           ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-            # Linux-specific
             clang
             cmake
             ninja
           ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
-            # macOS-specific
             cocoapods
           ];
 
@@ -54,15 +52,7 @@
             echo "Claude Remote dev environment"
             echo "  Node: $(node --version)"
             echo "  pnpm: $(pnpm --version)"
-            echo "  Flutter: $(flutter --version --machine 2>/dev/null | head -1 || echo 'run: flutter doctor')"
-            echo ""
-            echo "Commands:"
-            echo "  pnpm dev        - Run Next.js server"
-            echo "  cd flutter_client && flutter run - Run Flutter app"
           '';
-
-          # Flutter needs this
-          CHROME_EXECUTABLE = "${pkgs.google-chrome}/bin/google-chrome-stable";
         };
       });
 }
