@@ -4,10 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:local_auth/local_auth.dart';
 import '../../providers/auth_provider.dart';
+import '../theme/colors.dart';
+import '../theme/spacing.dart';
 
 class PinScreen extends ConsumerStatefulWidget {
   const PinScreen({super.key});
-  
+
   @override
   ConsumerState<PinScreen> createState() => _PinScreenState();
 }
@@ -18,13 +20,13 @@ class _PinScreenState extends ConsumerState<PinScreen> {
   bool _isAuthenticating = false;
   bool _canUseBiometrics = false;
   String? _error;
-  
+
   @override
   void initState() {
     super.initState();
     _checkBiometrics();
   }
-  
+
   Future<void> _checkBiometrics() async {
     try {
       final canCheck = await _localAuth.canCheckBiometrics;
@@ -45,7 +47,7 @@ class _PinScreenState extends ConsumerState<PinScreen> {
       // Biometrics not available
     }
   }
-  
+
   Future<void> _authenticateWithBiometrics() async {
     // Check if we have a stored PIN first
     final storage = ref.read(storageProvider);
@@ -88,7 +90,7 @@ class _PinScreenState extends ConsumerState<PinScreen> {
       }
     }
   }
-  
+
   Future<void> _authenticateWithPin() async {
     final pin = _pinController.text.trim();
     if (pin.length < 4) {
@@ -118,63 +120,65 @@ class _PinScreenState extends ConsumerState<PinScreen> {
       }
     }
   }
-  
+
   @override
   Widget build(BuildContext context) {
     final authState = ref.watch(authStateProvider);
-    
+
     // Handle auth state error
     if (authState.error != null && _error == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         setState(() => _error = authState.error);
       });
     }
-    
+
     // Navigate on success
     if (authState.isAuthenticated) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         context.go('/task');
       });
     }
-    
+
     return Scaffold(
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(AppSpacing.xl),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const Icon(
                 Icons.lock_outline,
                 size: 64,
-                color: Colors.blue,
+                color: AppColors.primary,
               ),
-              const SizedBox(height: 24),
+              AppSpacing.gapVerticalXl,
               const Text(
                 'Enter PIN',
                 style: TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.bold,
+                  color: AppColors.textPrimary,
                 ),
               ),
-              const SizedBox(height: 32),
-              
+              AppSpacing.gapVerticalXl,
+
               if (_error != null)
                 Container(
-                  padding: const EdgeInsets.all(12),
-                  margin: const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  margin: const EdgeInsets.only(bottom: AppSpacing.lg),
                   decoration: BoxDecoration(
-                    color: Colors.red.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.red),
+                    color: AppColors.error.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
+                    border: Border.all(color: AppColors.error),
                   ),
                   child: Text(
                     _error!,
-                    style: const TextStyle(color: Colors.red),
+                    style: const TextStyle(color: AppColors.error),
                     textAlign: TextAlign.center,
                   ),
                 ),
-              
+
               TextField(
                 controller: _pinController,
                 keyboardType: TextInputType.number,
@@ -183,17 +187,23 @@ class _PinScreenState extends ConsumerState<PinScreen> {
                 style: const TextStyle(
                   fontSize: 24,
                   letterSpacing: 8,
+                  color: AppColors.textPrimary,
                 ),
                 decoration: InputDecoration(
-                  hintText: '• • • •',
+                  hintText: '    ',
+                  hintStyle: const TextStyle(color: AppColors.textMuted),
                   filled: true,
-                  fillColor: Colors.grey[900],
+                  fillColor: AppColors.surface,
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(AppRadius.md),
                     borderSide: BorderSide.none,
                   ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                    borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
+                  ),
                   contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 24,
+                    horizontal: AppSpacing.xl,
                     vertical: 20,
                   ),
                 ),
@@ -205,24 +215,27 @@ class _PinScreenState extends ConsumerState<PinScreen> {
                 enabled: !_isAuthenticating,
                 autofocus: true,
               ),
-              
-              const SizedBox(height: 24),
-              
+
+              AppSpacing.gapVerticalXl,
+
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: _isAuthenticating ? null : _authenticateWithPin,
                   style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: AppColors.textOnPrimary,
+                    disabledBackgroundColor: AppColors.surfaceVariant,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(AppRadius.md),
                     ),
                   ),
                   child: _isAuthenticating
                       ? const SizedBox(
                           height: 20,
                           width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textOnPrimary),
                         )
                       : const Text(
                           'Unlock',
@@ -230,18 +243,21 @@ class _PinScreenState extends ConsumerState<PinScreen> {
                         ),
                 ),
               ),
-              
+
               if (_canUseBiometrics) ...[
-                const SizedBox(height: 16),
+                AppSpacing.gapVerticalLg,
                 TextButton.icon(
                   onPressed: _isAuthenticating ? null : _authenticateWithBiometrics,
                   icon: const Icon(Icons.fingerprint),
                   label: const Text('Use Biometrics'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.primary,
+                  ),
                 ),
               ],
-              
-              const SizedBox(height: 32),
-              
+
+              AppSpacing.gapVerticalXl,
+
               TextButton(
                 onPressed: () async {
                   await ref.read(authStateProvider.notifier).unpair();
@@ -251,7 +267,7 @@ class _PinScreenState extends ConsumerState<PinScreen> {
                 },
                 child: const Text(
                   'Unpair Device',
-                  style: TextStyle(color: Colors.grey),
+                  style: TextStyle(color: AppColors.textMuted),
                 ),
               ),
             ],
@@ -260,7 +276,7 @@ class _PinScreenState extends ConsumerState<PinScreen> {
       ),
     );
   }
-  
+
   @override
   void dispose() {
     _pinController.dispose();
