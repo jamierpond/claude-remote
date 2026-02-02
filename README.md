@@ -1,36 +1,106 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Claude Remote
+
+A secure mobile-friendly web interface for remotely accessing Claude Code from your phone or any device.
+
+## Features
+
+- **End-to-end encryption** - ECDH key exchange + AES-GCM encryption
+- **QR code pairing** - Easy device pairing with QR codes
+- **PIN protection** - Secure access with a PIN
+- **Mobile-first UI** - Optimized for phones with touch-friendly controls
+- **Real-time streaming** - See Claude's responses as they're generated
+- **Rich activity panel** - See exactly what Claude is doing:
+  - Tool calls with icons (Read, Write, Edit, Bash, etc.)
+  - **Live diff view** for file edits (red for removed, green for added)
+  - Syntax-highlighted bash commands
+  - Collapsible tool results
+  - Live streaming indicator
+
+## Activity Panel
+
+The chat interface includes a collapsible Activity panel that shows Claude's tool usage in real-time:
+
+```
+┌─────────────────────────────────────────────────┐
+│ ▶ Activity                    📄 Read  🔧 Edit  │
+├─────────────────────────────────────────────────┤
+│ ▶ 📄 Read                     Chat.tsx          │
+│ ▶ 🔧 Edit                     Chat.tsx          │
+│   ├─ /client/src/pages/Chat.tsx                 │
+│   ├─ - Remove:                                  │
+│   │   ┌──────────────────────────────────────┐  │
+│   │   │ const [foo, setFoo] = useState('');  │  │
+│   │   └──────────────────────────────────────┘  │
+│   └─ + Add:                                     │
+│       ┌──────────────────────────────────────┐  │
+│       │ const [bar, setBar] = useState('');  │  │
+│       └──────────────────────────────────────┘  │
+│ ▶ 💻 Bash                     pnpm run dev...   │
+└─────────────────────────────────────────────────┘
+```
+
+### Tool Icons
+
+| Icon | Tool | Description |
+|------|------|-------------|
+| 📄 | Read | Reading files |
+| ✏️ | Write | Creating new files |
+| 🔧 | Edit | Modifying existing files (shows diff) |
+| 💻 | Bash | Running shell commands |
+| 🔍 | Glob | Finding files by pattern |
+| 🔎 | Grep | Searching file contents |
+| 🤖 | Task | Spawning sub-agents |
+| 🌐 | WebFetch | Fetching web content |
+| 📝 | TodoWrite | Managing task lists |
+| ❓ | AskUserQuestion | Asking for input |
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
+
+- Node.js 20+
+- pnpm
+- Claude CLI installed and authenticated
+
+### Installation
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Development
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+pnpm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+This starts both the server (port 6767) and Vite dev server (port 5173).
 
-## Learn More
+### Environment Variables
 
-To learn more about Next.js, take a look at the following resources:
+Create a `.env.local` file:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+PIN=1234              # Access PIN
+CLIENT_URL=https://your-domain.com
+SERVER_URL=https://your-server.com
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Architecture
 
-## Deploy on Vercel
+- **Frontend**: React + TypeScript + Tailwind CSS (Vite)
+- **Backend**: Node.js WebSocket server
+- **Security**: ECDH key exchange, AES-256-GCM encryption
+- **Claude Integration**: Spawns Claude CLI with `--output-format stream-json`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Mobile Optimizations
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Dynamic viewport height (`100dvh`) for proper mobile browser support
+- Safe area insets for notched devices
+- 44px minimum touch targets
+- Rounded pill-style input and buttons
+- Collapsible sections to maximize screen space
+
+## License
+
+MIT

@@ -1,18 +1,32 @@
 import { spawn, ChildProcess } from 'child_process';
 
+export interface ToolUseEvent {
+  tool: string;
+  input: Record<string, unknown>;
+}
+
+export interface ToolResultEvent {
+  tool: string;
+  output?: string;
+  error?: string;
+}
+
 export interface ClaudeEvent {
-  type: 'thinking' | 'text' | 'error' | 'done' | 'session_init';
+  type: 'thinking' | 'text' | 'error' | 'done' | 'session_init' | 'tool_use' | 'tool_result';
   text?: string;
   sessionId?: string;
+  toolUse?: ToolUseEvent;
+  toolResult?: ToolResultEvent;
 }
 
 export function spawnClaude(
   message: string,
   onEvent: (event: ClaudeEvent) => void,
   signal?: AbortSignal,
-  sessionId?: string | null
+  sessionId?: string | null,
+  workingDirectory?: string
 ): ChildProcess {
-  const args = ['--print', '--output-format', 'stream-json', '--verbose'];
+  const args = ['--print', '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'];
 
   if (sessionId) {
     // Resume existing session
@@ -29,10 +43,12 @@ export function spawnClaude(
   console.log('[claude] Command: claude', args.join(' '));
   console.log('[claude] Full args array:', JSON.stringify(args));
   console.log('[claude] Message:', message);
+  console.log('[claude] Working directory:', workingDirectory || '(current)');
   console.log('='.repeat(60));
 
   const proc = spawn('claude', args, {
     stdio: ['ignore', 'pipe', 'pipe'],  // ignore stdin, pipe stdout/stderr
+    cwd: workingDirectory,
   });
 
   console.log('[claude] Process spawned, PID:', proc.pid);
@@ -105,40 +121,47 @@ export function spawnClaude(
             onEvent({ type: 'text', text: block.text });
             sentAnyText = true;
           } else if (block.type === 'tool_use') {
-            // Show tool use activity with context
+            // Send full tool use event
             const toolName = block.name || 'unknown';
             const input = block.input || {};
-            let context = '';
 
-            // Extract useful context based on tool type
-            if (input.file_path) {
-              context = ` → ${input.file_path}`;
-            } else if (input.command) {
-              const cmd = input.command.substring(0, 60);
-              context = ` → ${cmd}${input.command.length > 60 ? '...' : ''}`;
-            } else if (input.pattern) {
-              context = ` → ${input.pattern}`;
-            } else if (input.query) {
-              context = ` → "${input.query.substring(0, 40)}..."`;
-            } else if (input.url) {
-              context = ` → ${input.url}`;
-            } else if (input.prompt) {
-              context = ` → "${input.prompt.substring(0, 40)}..."`;
-            }
-
-            console.log('[claude] Tool use:', toolName, context);
-            onEvent({ type: 'thinking', text: `[${toolName}${context}]\n` });
+            console.log('[claude] Tool use:', toolName);
+            onEvent({
+              type: 'tool_use',
+              toolUse: {
+                tool: toolName,
+                input: input as Record<string, unknown>
+              }
+            });
           }
         }
       }
     } else if (data.type === 'user' && data.message) {
-      // Tool results - show abbreviated info
+      // Tool results
       const content = data.message.content;
       if (Array.isArray(content)) {
         for (const block of content) {
           if (block.type === 'tool_result') {
             console.log('[claude] Tool result received');
-            // Don't spam the user with full tool results, just note it happened
+            // Extract tool result content
+            let output = '';
+            if (typeof block.content === 'string') {
+              output = block.content;
+            } else if (Array.isArray(block.content)) {
+              output = block.content
+                .filter((c: { type: string }) => c.type === 'text')
+                .map((c: { text: string }) => c.text)
+                .join('\n');
+            }
+
+            onEvent({
+              type: 'tool_result',
+              toolResult: {
+                tool: block.tool_use_id || 'unknown',
+                output: output.substring(0, 5000), // Limit size
+                error: block.is_error ? output : undefined
+              }
+            });
           }
         }
       }
