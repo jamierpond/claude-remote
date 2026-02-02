@@ -60,7 +60,7 @@ class TaskNotifier extends StateNotifier<Task?> {
         // Detect if this should be a new chunk
         final isNewChunk = _lastTool != null ||
             text.startsWith('\n\n') ||
-            RegExp(r'^(Now|Next|Let me|I\'ll|First|Finally|Done)', caseSensitive: false)
+            RegExp(r"^(Now|Next|Let me|I'll|First|Finally|Done)", caseSensitive: false)
                 .hasMatch(text.trim());
         
         if (isNewChunk && _chunks.isNotEmpty) {

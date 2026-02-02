@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/task.dart';
 import '../../providers/task_provider.dart';
-import '../../core/storage.dart';
+import '../../providers/auth_provider.dart';
 import '../widgets/task_header.dart';
 import '../widgets/thinking_panel.dart';
 import '../widgets/activity_feed.dart';

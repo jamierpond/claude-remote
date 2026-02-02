@@ -1,4 +1,4 @@
-.PHONY: get build run ios ios-sim ios-release clean doctor gen watch
+.PHONY: get build run ios ios-sim ios-release clean doctor gen watch rebuild
 
 # Install dependencies
 get:
@@ -16,15 +16,15 @@ watch:
 run:
 	flutter run
 
-# iOS development
+# iOS development (physical device)
 ios:
-	flutter run -d ios
+	flutter run -d pond
 
 ios-sim:
 	flutter run -d "iPhone"
 
 ios-release:
-	flutter run -d ios --release
+	flutter run -d pond --release
 
 # List available devices
 devices:
@@ -50,6 +50,11 @@ clean:
 	flutter clean
 	cd ios && rm -rf Pods Podfile.lock
 	rm -rf .dart_tool build
+
+# Clean and rebuild on device
+rebuild: clean
+	flutter pub get
+	flutter run -d pond
 
 # Check setup
 doctor:
