@@ -70,7 +70,7 @@ status:
 
 # Daemon logs (follow mode)
 logs:
-	@tail -f logs/daemon-server.log
+	@tail -n 100 -f logs/daemon-server.log
 
 # Trigger reload for all dev processes
 # - Touches server.ts to trigger tsx --watch restart
