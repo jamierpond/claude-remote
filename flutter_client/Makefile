@@ -16,15 +16,15 @@ watch:
 run:
 	flutter run
 
-# iOS development
+# iOS development (physical device)
 ios:
-	flutter run -d ios
+	flutter run -d pond
 
 ios-sim:
 	flutter run -d "iPhone"
 
 ios-release:
-	flutter run -d ios --release
+	flutter run -d pond --release
 
 # List available devices
 devices:
