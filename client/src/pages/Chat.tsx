@@ -121,8 +121,9 @@ export default function Chat({ token }: Props) {
   }, [messages, currentThinking, currentResponse]);
 
   useEffect(() => {
+    console.log('Chat useEffect: token =', token);
     if (token) {
-      // New pairing - clear old credentials first
+      console.log('New pairing flow - clearing old credentials');
       localStorage.removeItem('claude-remote-paired');
       localStorage.removeItem('claude-remote-device-id');
       localStorage.removeItem('claude-remote-private-key');
@@ -130,10 +131,15 @@ export default function Chat({ token }: Props) {
       // Stay in 'pairing' view, completePairing will run
     } else {
       const stored = localStorage.getItem('claude-remote-paired');
+      console.log('No token, checking localStorage:', { stored });
       if (stored) {
+        console.log('Found pairing, showing PIN view');
         setView('pin');
       } else {
-        setError('Not paired. Go to home page to scan QR code.');
+        const msg = 'Not paired. Go to home page to scan QR code.';
+        console.error(msg);
+        alert(msg);
+        setError(msg);
       }
     }
   }, [token]);
@@ -469,8 +475,9 @@ export default function Chat({ token }: Props) {
       );
       wsRef.current.send(JSON.stringify(encrypted));
     } catch (err) {
-      const msg = `Failed to encrypt/send message: ${err}`;
+      const msg = `FATAL: Failed to encrypt/send message: ${err}`;
       console.error(msg, err);
+      alert(msg);
       setError(msg);
       setIsStreaming(false);
     }
