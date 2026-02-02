@@ -414,14 +414,12 @@ async function main() {
   server.listen(port, () => {
     console.log(`> Server ready on ${serverUrl}`);
     console.log(`> Client URL: ${clientUrl}`);
+    console.log(`> Paired devices: ${devices.length}`);
     if (serverState.pairingToken) {
       const pairUrl = `${clientUrl}/pair/${serverState.pairingToken}`;
       console.log(`> Pair URL: ${pairUrl}`);
       console.log('');
       qrcode.generate(pairUrl, { small: true });
-    } else {
-      console.log('> Device already paired');
-      console.log(`> Go to ${clientUrl} to chat or unpair`);
     }
   });
 }
