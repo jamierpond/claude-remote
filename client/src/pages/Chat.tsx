@@ -233,7 +233,12 @@ export default function Chat({ token }: Props) {
           }));
           updateProjectState(projectId, state => ({ ...state, messages: loadedMessages }));
           // Scroll to bottom after messages are rendered
-          setTimeout(() => scrollToBottom(true), 100);
+          // Use requestAnimationFrame to ensure DOM is updated, then scroll
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+            });
+          });
         }
         return; // Success
       } catch (err) {
