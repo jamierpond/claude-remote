@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import '../core/storage.dart';
@@ -88,26 +89,68 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
   
   Future<void> pair(String serverUrl, String token) async {
+    final getUrl = '$serverUrl/api/pair/$token';
+
+    // Step 1: Generate key pair
+    debugPrint('[AUTH] Step 1: Generating key pair...');
+    String publicKey;
     try {
-      // Generate key pair
-      final publicKey = await crypto.generateKeyPair();
-      
-      // Get server's public key
-      final response = await _httpGet('$serverUrl/api/pair/$token');
-      final serverPublicKey = response['serverPublicKey'] as String;
-      
-      // Complete pairing
-      final pairResponse = await _httpPost(
-        '$serverUrl/api/pair/$token',
-        {'clientPublicKey': publicKey},
-      );
-      
-      final deviceId = pairResponse['deviceId'] as String;
-      
-      // Derive shared secret
+      publicKey = await crypto.generateKeyPair();
+      debugPrint('[AUTH] Step 1 OK: Generated public key (${publicKey.length} chars)');
+    } catch (e, stack) {
+      debugPrint('[AUTH] Step 1 FAILED: $e\n$stack');
+      throw Exception('Failed to generate key pair: $e');
+    }
+
+    // Step 2: GET server's public key
+    debugPrint('[AUTH] Step 2: GET $getUrl');
+    Map<String, dynamic> getResponse;
+    try {
+      getResponse = await _httpGet(getUrl);
+      debugPrint('[AUTH] Step 2 OK: Got response: $getResponse');
+    } catch (e, stack) {
+      debugPrint('[AUTH] Step 2 FAILED: $e\n$stack');
+      throw Exception('Failed to get server public key from $getUrl: $e');
+    }
+
+    final serverPublicKey = getResponse['serverPublicKey'] as String?;
+    if (serverPublicKey == null || serverPublicKey.isEmpty) {
+      debugPrint('[AUTH] Step 2 FAILED: No serverPublicKey in response');
+      throw Exception('Server response missing serverPublicKey. Got: $getResponse');
+    }
+    debugPrint('[AUTH] Step 2 OK: Server public key (${serverPublicKey.length} chars)');
+
+    // Step 3: POST client's public key
+    debugPrint('[AUTH] Step 3: POST $getUrl with clientPublicKey');
+    Map<String, dynamic> postResponse;
+    try {
+      postResponse = await _httpPost(getUrl, {'clientPublicKey': publicKey});
+      debugPrint('[AUTH] Step 3 OK: Got response: $postResponse');
+    } catch (e, stack) {
+      debugPrint('[AUTH] Step 3 FAILED: $e\n$stack');
+      throw Exception('Failed to complete pairing POST: $e');
+    }
+
+    final deviceId = postResponse['deviceId'] as String?;
+    if (deviceId == null || deviceId.isEmpty) {
+      debugPrint('[AUTH] Step 3 FAILED: No deviceId in response');
+      throw Exception('Server response missing deviceId. Got: $postResponse');
+    }
+    debugPrint('[AUTH] Step 3 OK: Got deviceId: $deviceId');
+
+    // Step 4: Derive shared secret
+    debugPrint('[AUTH] Step 4: Deriving shared secret...');
+    try {
       await crypto.deriveSharedSecret(serverPublicKey);
-      
-      // Save to secure storage
+      debugPrint('[AUTH] Step 4 OK: Derived shared secret');
+    } catch (e, stack) {
+      debugPrint('[AUTH] Step 4 FAILED: $e\n$stack');
+      throw Exception('Failed to derive shared secret: $e');
+    }
+
+    // Step 5: Save to storage
+    debugPrint('[AUTH] Step 5: Saving to storage...');
+    try {
       final secret = await crypto.exportSharedSecret();
       if (secret != null) {
         await storage.saveSharedSecret(secret);
@@ -115,16 +158,18 @@ class AuthNotifier extends StateNotifier<AuthState> {
       await storage.saveDeviceId(deviceId);
       await storage.saveServerUrl(serverUrl);
       await storage.setIsPaired(true);
-      
-      state = state.copyWith(
-        isPaired: true,
-        serverUrl: serverUrl,
-        deviceId: deviceId,
-      );
-    } catch (e) {
-      state = state.copyWith(error: 'Pairing failed: $e');
-      rethrow;
+      debugPrint('[AUTH] Step 5 OK: Saved to storage');
+    } catch (e, stack) {
+      debugPrint('[AUTH] Step 5 FAILED: $e\n$stack');
+      throw Exception('Failed to save pairing data: $e');
     }
+
+    state = state.copyWith(
+      isPaired: true,
+      serverUrl: serverUrl,
+      deviceId: deviceId,
+    );
+    debugPrint('[AUTH] Pairing complete!');
   }
   
   Future<void> authenticate(String pin) async {

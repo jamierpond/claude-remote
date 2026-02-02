@@ -20,6 +20,7 @@ class _PairScreenState extends ConsumerState<PairScreen> {
   String? _error;
   String? _lastScanned;
   String? _pairingUrl;
+  int _detectCount = 0;
 
   @override
   void initState() {
@@ -122,13 +123,38 @@ class _PairScreenState extends ConsumerState<PairScreen> {
   
   @override
   Widget build(BuildContext context) {
+    // Debug: show current state
+    final stateStr = 'scanning=$_isScanning pairing=$_isPairing err=${_error != null} scanned=${_lastScanned != null}';
+
     return Scaffold(
+      backgroundColor: _isPairing ? Colors.orange : (_error != null ? Colors.red.shade900 : null),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              // Always visible state debug
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(8),
+                color: Colors.black87,
+                child: Text(
+                  stateStr,
+                  style: const TextStyle(color: Colors.green, fontSize: 10, fontFamily: 'monospace'),
+                ),
+              ),
+              if (_lastScanned != null)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  color: Colors.blue.shade900,
+                  child: Text(
+                    'SCANNED: $_lastScanned',
+                    style: const TextStyle(color: Colors.white, fontSize: 10, fontFamily: 'monospace'),
+                  ),
+                ),
+              const SizedBox(height: 16),
               const Icon(
                 Icons.link,
                 size: 64,
@@ -224,16 +250,38 @@ class _PairScreenState extends ConsumerState<PairScreen> {
                 )
               else if (_isScanning)
                 Expanded(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: MobileScanner(
-                      onDetect: (capture) {
-                        final barcode = capture.barcodes.firstOrNull;
-                        if (barcode != null) {
-                          _onQRScanned(barcode.rawValue);
-                        }
-                      },
-                    ),
+                  child: Column(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        color: Colors.yellow,
+                        child: Text(
+                          'SCANNING - detections: $_detectCount',
+                          style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: MobileScanner(
+                            onDetect: (capture) {
+                              debugPrint('[DETECT] onDetect fired! barcodes: ${capture.barcodes.length}');
+                              setState(() => _detectCount++);
+                              for (final barcode in capture.barcodes) {
+                                debugPrint('[DETECT] barcode: format=${barcode.format} rawValue=${barcode.rawValue}');
+                              }
+                              final barcode = capture.barcodes.firstOrNull;
+                              if (barcode != null && barcode.rawValue != null) {
+                                _onQRScanned(barcode.rawValue);
+                              } else {
+                                debugPrint('[DETECT] No valid barcode rawValue');
+                                setState(() => _error = 'Detected barcode but no rawValue. Format: ${barcode?.format}');
+                              }
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 )
               else
