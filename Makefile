@@ -1,9 +1,20 @@
-.PHONY: dev dev-server dev-client dev-vite dev-flutter-client build start logs-server logs-client install clean reload kill restart
+.PHONY: dev dev-server dev-client dev-vite dev-flutter-client build start stop restart status logs logs-server logs-client deps install clean reload kill dev-restart
 
-# Install all dependencies
-install:
+# Install dependencies only
+deps:
 	pnpm install
 	cd flutter_client && flutter pub get
+
+# Full install: deps + PM2 daemon setup
+install: deps
+	@echo "Setting up PM2 daemon..."
+	@which pm2 > /dev/null || npm install -g pm2
+	@pm2 describe claude-remote > /dev/null 2>&1 && pm2 delete claude-remote || true
+	@pm2 start ecosystem.config.js
+	@pm2 save
+	@echo ""
+	@echo "Daemon installed and running."
+	@echo "Run 'pm2 startup' and follow instructions to enable auto-start on boot."
 
 # Run server + Flutter web client (with hot reload)
 # Server: tsx --watch auto-restarts on .ts file changes
@@ -36,9 +47,28 @@ dev-flutter-client:
 build:
 	pnpm build
 
-# Start production server
+# Start daemon (production)
 start:
-	pnpm start
+	@pm2 start ecosystem.config.js 2>/dev/null || pm2 restart claude-remote
+	@echo "Daemon started. Use 'make logs' to view output."
+
+# Stop daemon
+stop:
+	@pm2 stop claude-remote
+	@echo "Daemon stopped."
+
+# Restart daemon (production)
+restart:
+	@pm2 restart claude-remote
+	@echo "Daemon restarted."
+
+# Daemon status
+status:
+	@pm2 status claude-remote
+
+# Daemon logs (follow mode)
+logs:
+	@pm2 logs claude-remote --lines 50
 
 # Trigger reload for all dev processes
 # - Touches server.ts to trigger tsx --watch restart
@@ -64,8 +94,8 @@ kill:
 	@fuser -k 3001/tcp 2>/dev/null || true
 	@echo "Done"
 
-# Full restart
-restart: kill
+# Restart dev mode (kill + restart)
+dev-restart: kill
 	@sleep 1
 	$(MAKE) dev
 
@@ -79,10 +109,17 @@ logs-client:
 logs-flutter:
 	tail -f logs/flutter.log
 
-# Clean
+# Clean build artifacts
 clean:
 	rm -rf node_modules .next logs/*.log dist
 	cd flutter_client && flutter clean
+
+# Uninstall daemon
+uninstall:
+	@pm2 stop claude-remote 2>/dev/null || true
+	@pm2 delete claude-remote 2>/dev/null || true
+	@pm2 save
+	@echo "Daemon removed."
 
 # Nix/direnv setup
 nix-allow:
