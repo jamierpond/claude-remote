@@ -33,12 +33,15 @@ class _PairScreenState extends ConsumerState<PairScreen> {
     // For now, require manual server URL entry
   }
   
+  String? _pairingUrl;
+
   Future<void> _pair(String serverUrl, String token) async {
     setState(() {
       _isPairing = true;
       _error = null;
+      _pairingUrl = '$serverUrl/pair/$token';
     });
-    
+
     try {
       await ref.read(authStateProvider.notifier).pair(serverUrl, token);
       if (mounted) {
@@ -46,36 +49,38 @@ class _PairScreenState extends ConsumerState<PairScreen> {
       }
     } catch (e) {
       setState(() {
-        _error = e.toString();
+        _error = 'Failed to pair with $serverUrl\n\nError: $e';
       });
     } finally {
-      setState(() {
-        _isPairing = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isPairing = false;
+        });
+      }
     }
   }
   
   void _onQRScanned(String? code) {
-    if (code == null || _isPairing) return;
-    
-    // Parse URL: https://ai.pond.audio/pair/{token}
+    if (code == null || _isPairing || !_isScanning) return;
+
+    // Stop scanning immediately
+    setState(() => _isScanning = false);
+
+    // Parse URL: https://server/pair/{token}
     final uri = Uri.tryParse(code);
     if (uri == null) {
-      setState(() => _error = 'Invalid QR code');
+      setState(() => _error = 'Invalid QR code: $code');
       return;
     }
-    
+
     final pathSegments = uri.pathSegments;
     if (pathSegments.length >= 2 && pathSegments[0] == 'pair') {
       final token = pathSegments[1];
       final serverUrl = '${uri.scheme}://${uri.host}${uri.hasPort ? ':${uri.port}' : ''}';
-      
-      // Replace client URL with server URL (assuming convention)
-      final apiServerUrl = serverUrl.replaceAll('ai.pond.audio', 'ai-server.pond.audio');
-      
-      _pair(apiServerUrl, token);
+
+      _pair(serverUrl, token);
     } else {
-      setState(() => _error = 'Invalid pairing URL');
+      setState(() => _error = 'Invalid pairing URL format.\nExpected: https://server/pair/TOKEN\nGot: $code');
     }
   }
   
@@ -125,11 +130,22 @@ class _PairScreenState extends ConsumerState<PairScreen> {
                 ),
               
               if (_isPairing)
-                const Column(
+                Column(
                   children: [
-                    CircularProgressIndicator(),
-                    SizedBox(height: 16),
-                    Text('Pairing...'),
+                    const CircularProgressIndicator(),
+                    const SizedBox(height: 16),
+                    const Text('Pairing...'),
+                    if (_pairingUrl != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        _pairingUrl!,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
                   ],
                 )
               else if (_isScanning)
