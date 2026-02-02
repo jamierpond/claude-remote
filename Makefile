@@ -11,7 +11,7 @@ install:
 dev:
 	@mkdir -p logs
 	@echo "Starting server and Flutter web client..."
-	@(tsx --watch server.ts 2>&1 | tee logs/server.log) & \
+	@(pnpm tsx --watch server.ts 2>&1 | tee logs/server.log) & \
 	(cd flutter_client && flutter run -d web-server --web-port=3000 2>&1 | tee ../logs/flutter.log)
 
 # Run both server and React web client (with hot reload)
@@ -24,7 +24,7 @@ dev-vite:
 dev-server:
 	pnpm dev:server
 
-# Run client only (React web)
+# Run client only (Vite/React web)
 dev-client:
 	pnpm dev:client
 
