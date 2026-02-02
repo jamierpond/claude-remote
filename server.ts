@@ -180,40 +180,37 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     return json(res, { serverPublicKey: serverState.publicKey, deviceId: newDevice.id });
   }
 
-  // API: Unpair
+  // API: Unpair specific device or all devices
   if (pathname === '/api/unpair' && method === 'POST') {
-    const { unlinkSync } = await import('fs');
-    const { join } = await import('path');
-    const { homedir } = await import('os');
-
-    const configDir = join(homedir(), '.config', 'claude-remote');
-    const devicePath = join(configDir, 'device.json');
-    const serverPath = join(configDir, 'server.json');
-
-    if (existsSync(devicePath)) {
-      unlinkSync(devicePath);
+    let body = '';
+    for await (const chunk of req) {
+      body += chunk;
     }
 
-    if (existsSync(serverPath)) {
-      const state = JSON.parse(readFileSync(serverPath, 'utf8'));
-      state.pairingToken = randomBytes(16).toString('hex');
+    let deviceId: string | null = null;
+    try {
+      const parsed = JSON.parse(body);
+      deviceId = parsed.deviceId || null;
+    } catch {
+      // No body or invalid JSON - unpair all
+    }
+
+    if (deviceId) {
+      // Remove specific device
+      removeDevice(deviceId);
+      console.log(`> Device ${deviceId} unpaired`);
+    } else {
+      // Remove all devices
       const { writeFileSync } = await import('fs');
-      writeFileSync(serverPath, JSON.stringify(state, null, 2));
+      const { join } = await import('path');
+      const { homedir } = await import('os');
+      const configDir = join(homedir(), '.config', 'claude-remote');
+      writeFileSync(join(configDir, 'devices.json'), '[]');
+      console.log('> All devices unpaired');
     }
 
     reloadState();
-
-    // Log new pair URL
-    if (serverState.pairingToken) {
-      const pairUrl = `${clientUrl}/pair/${serverState.pairingToken}`;
-      console.log('');
-      console.log('> Unpaired! New pair URL:');
-      console.log(`> ${pairUrl}`);
-      console.log('');
-      qrcode.generate(pairUrl, { small: true });
-    }
-
-    return json(res, { success: true });
+    return json(res, { success: true, deviceCount: devices.length });
   }
 
   // Static files (production)
