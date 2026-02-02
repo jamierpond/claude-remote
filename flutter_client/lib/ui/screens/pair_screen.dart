@@ -18,39 +18,45 @@ class _PairScreenState extends ConsumerState<PairScreen> {
   bool _isScanning = false;
   bool _isPairing = false;
   String? _error;
-  
+  String? _lastScanned;
+  String? _pairingUrl;
+
   @override
   void initState() {
     super.initState();
     if (widget.token != null) {
-      // Token provided via deep link - extract server URL
       _handleDeepLink();
     }
   }
-  
+
   void _handleDeepLink() {
-    // Parse token from URL - format: https://ai.pond.audio/pair/{token}
-    // For now, require manual server URL entry
+    // Token provided via deep link - not implemented yet
   }
-  
-  String? _pairingUrl;
 
   Future<void> _pair(String serverUrl, String token) async {
+    if (!mounted) return;
+
     setState(() {
       _isPairing = true;
       _error = null;
-      _pairingUrl = '$serverUrl/pair/$token';
+      _pairingUrl = '$serverUrl/api/pair/$token';
     });
 
     try {
+      debugPrint('[PAIR] Starting pairing with $serverUrl, token=$token');
       await ref.read(authStateProvider.notifier).pair(serverUrl, token);
+      debugPrint('[PAIR] Pairing succeeded!');
       if (mounted) {
         context.go('/pin');
       }
-    } catch (e) {
-      setState(() {
-        _error = 'Failed to pair with $serverUrl\n\nError: $e';
-      });
+    } catch (e, stack) {
+      debugPrint('[PAIR] ERROR: $e');
+      debugPrint('[PAIR] Stack: $stack');
+      if (mounted) {
+        setState(() {
+          _error = 'Pairing failed!\n\nServer: $serverUrl\nToken: $token\n\nError: $e';
+        });
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -59,37 +65,58 @@ class _PairScreenState extends ConsumerState<PairScreen> {
       }
     }
   }
-  
+
   void _onQRScanned(String? code) {
     if (code == null || _isPairing || !_isScanning) return;
 
+    debugPrint('[SCAN] QR scanned: $code');
+
     // Stop scanning immediately
-    setState(() => _isScanning = false);
+    setState(() {
+      _isScanning = false;
+      _lastScanned = code;
+    });
 
-    // Parse URL: https://server/pair/{token}
-    final uri = Uri.tryParse(code);
-    if (uri == null) {
-      setState(() => _error = 'Invalid QR code: $code');
-      return;
-    }
-
-    final pathSegments = uri.pathSegments;
-    if (pathSegments.length >= 2 && pathSegments[0] == 'pair') {
-      final token = pathSegments[1];
-
-      // QR code contains client URL (port 5173), but API is on server (port 6767)
-      // For localhost, swap ports. For production, assume same host.
-      var serverUrl = '${uri.scheme}://${uri.host}';
-      if (uri.host == 'localhost' || uri.host == '127.0.0.1') {
-        // Local dev: client is 5173, server is 6767
-        serverUrl = '${uri.scheme}://${uri.host}:6767';
-      } else if (uri.hasPort) {
-        serverUrl = '${uri.scheme}://${uri.host}:${uri.port}';
+    try {
+      final uri = Uri.tryParse(code);
+      if (uri == null) {
+        setState(() => _error = 'Could not parse QR code as URL:\n$code');
+        return;
       }
 
-      _pair(serverUrl, token);
-    } else {
-      setState(() => _error = 'Invalid pairing URL format.\nExpected: https://server/pair/TOKEN\nGot: $code');
+      debugPrint('[SCAN] Parsed URI: scheme=${uri.scheme} host=${uri.host} port=${uri.port} path=${uri.path}');
+      debugPrint('[SCAN] Path segments: ${uri.pathSegments}');
+
+      final pathSegments = uri.pathSegments;
+      if (pathSegments.length >= 2 && pathSegments[0] == 'pair') {
+        final token = pathSegments[1];
+
+        // Construct server URL
+        // - localhost: client is 5173, server is 6767
+        // - ai.pond.audio (client) -> ai-server.pond.audio (server)
+        // - otherwise: assume same host
+        String serverUrl;
+        if (uri.host == 'localhost' || uri.host == '127.0.0.1') {
+          serverUrl = '${uri.scheme}://${uri.host}:6767';
+        } else if (uri.host == 'ai.pond.audio') {
+          serverUrl = '${uri.scheme}://ai-server.pond.audio';
+        } else if (uri.hasPort) {
+          serverUrl = '${uri.scheme}://${uri.host}:${uri.port}';
+        } else {
+          serverUrl = '${uri.scheme}://${uri.host}';
+        }
+
+        debugPrint('[SCAN] Derived serverUrl: $serverUrl');
+        debugPrint('[SCAN] Token: $token');
+
+        _pair(serverUrl, token);
+      } else {
+        setState(() => _error = 'Invalid URL format.\n\nExpected path: /pair/TOKEN\nGot: ${uri.path}\n\nFull URL: $code');
+      }
+    } catch (e, stack) {
+      debugPrint('[SCAN] Exception: $e');
+      debugPrint('[SCAN] Stack: $stack');
+      setState(() => _error = 'Error processing QR code:\n$e\n\nScanned: $code');
     }
   }
   
@@ -127,14 +154,52 @@ class _PairScreenState extends ConsumerState<PairScreen> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   margin: const EdgeInsets.only(bottom: 16),
+                  constraints: const BoxConstraints(maxHeight: 200),
                   decoration: BoxDecoration(
                     color: Colors.red.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: Colors.red),
                   ),
-                  child: Text(
-                    _error!,
-                    style: const TextStyle(color: Colors.red),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(Icons.error, color: Colors.red, size: 20),
+                            SizedBox(width: 8),
+                            Text('ERROR', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        SelectableText(
+                          _error!,
+                          style: const TextStyle(color: Colors.red, fontSize: 12, fontFamily: 'monospace'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+              if (_lastScanned != null && _error == null && !_isPairing)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Last scanned:', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      const SizedBox(height: 4),
+                      SelectableText(
+                        _lastScanned!,
+                        style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+                      ),
+                    ],
                   ),
                 ),
               
