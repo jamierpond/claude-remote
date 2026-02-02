@@ -20,16 +20,39 @@ export function spawnClaude(
   console.log('='.repeat(60));
 
   const proc = spawn('claude', args, {
-    stdio: ['pipe', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe'],  // ignore stdin, pipe stdout/stderr
   });
 
   console.log('[claude] Process spawned, PID:', proc.pid);
 
   if (!proc.pid) {
-    console.error('[claude] FATAL: No PID - process failed to spawn!');
-    onEvent({ type: 'error', text: 'Failed to spawn claude process' });
-    onEvent({ type: 'done' });
+    const err = '[claude] FATAL: No PID - process failed to spawn!';
+    console.error(err);
+    throw new Error(err);
   }
+
+  console.log('[claude] stdin ignored (not piped)');
+
+  // TIMEOUT: If no output after 10 seconds, something is wrong
+  let receivedOutput = false;
+  const timeout = setTimeout(() => {
+    if (!receivedOutput) {
+      const err = `[claude] FATAL: No output received after 10 seconds! Process may be hung. PID: ${proc.pid}`;
+      console.error(err);
+      console.error('[claude] Killing hung process...');
+      proc.kill('SIGKILL');
+      onEvent({ type: 'error', text: err });
+      onEvent({ type: 'done' });
+    }
+  }, 10000);
+
+  const markOutputReceived = () => {
+    if (!receivedOutput) {
+      receivedOutput = true;
+      clearTimeout(timeout);
+      console.log('[claude] First output received, timeout cleared');
+    }
+  };
 
   let buffer = '';
   let currentType: 'thinking' | 'text' | null = null;
@@ -73,6 +96,7 @@ export function spawnClaude(
   };
 
   proc.stdout?.on('data', (chunk: Buffer) => {
+    markOutputReceived();
     const text = chunk.toString();
     console.log('[claude] STDOUT received, length:', text.length);
     console.log('[claude] STDOUT content:', text.substring(0, 200));
@@ -83,11 +107,10 @@ export function spawnClaude(
   });
 
   proc.stderr?.on('data', (chunk: Buffer) => {
+    markOutputReceived();
     const text = chunk.toString();
     console.error('[claude] STDERR:', text);
-    if (text.trim()) {
-      onEvent({ type: 'error', text });
-    }
+    onEvent({ type: 'error', text });
   });
 
   proc.on('close', (code, signal) => {
