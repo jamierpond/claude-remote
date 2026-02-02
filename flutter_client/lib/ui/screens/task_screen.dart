@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -279,14 +280,15 @@ class _TaskScreenState extends ConsumerState<TaskScreen> {
             constraints: const BoxConstraints(),
           ),
 
-          // Dev reload button
-          IconButton(
-            onPressed: _devReload,
-            icon: const Icon(Icons.build, color: AppColors.warning, size: 20),
-            tooltip: 'Dev Reload',
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-          ),
+          // Dev reload button (web only)
+          if (kIsWeb)
+            IconButton(
+              onPressed: _devReload,
+              icon: const Icon(Icons.build, color: AppColors.warning, size: 20),
+              tooltip: 'Dev Reload',
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+            ),
         ],
       ),
     );
