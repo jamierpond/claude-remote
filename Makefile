@@ -7,7 +7,7 @@ install:
 
 # Run server + Flutter web client (with hot reload)
 # Server: tsx --watch auto-restarts on .ts file changes
-# Flutter: flutter run -d web-server with hot reload on port 3000
+# Flutter: flutter run -d web-server with hot reload on port 5173
 dev:
 	@mkdir -p logs
 	@echo "Starting server and Flutter web client..."
