@@ -55,6 +55,7 @@ export function spawnClaude(
   };
 
   let buffer = '';
+  let sentAnyText = false;
 
   const processLine = (line: string) => {
     if (!line.trim()) return;
@@ -75,7 +76,7 @@ export function spawnClaude(
     if (data.type === 'system' && data.subtype === 'init') {
       console.log('[claude] Session initialized');
     } else if (data.type === 'assistant' && data.message) {
-      // Extract text content from the message
+      // Extract content from the message
       const content = data.message.content;
       if (Array.isArray(content)) {
         for (const block of content) {
@@ -85,11 +86,34 @@ export function spawnClaude(
           } else if (block.type === 'text' && block.text) {
             console.log('[claude] Sending text');
             onEvent({ type: 'text', text: block.text });
+            sentAnyText = true;
+          } else if (block.type === 'tool_use') {
+            // Show tool use activity to user
+            const toolName = block.name || 'unknown';
+            console.log('[claude] Tool use:', toolName);
+            onEvent({ type: 'thinking', text: `[Using tool: ${toolName}]\n` });
+          }
+        }
+      }
+    } else if (data.type === 'user' && data.message) {
+      // Tool results - show abbreviated info
+      const content = data.message.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type === 'tool_result') {
+            console.log('[claude] Tool result received');
+            // Don't spam the user with full tool results, just note it happened
           }
         }
       }
     } else if (data.type === 'result') {
-      console.log('[claude] Result received, sending done');
+      console.log('[claude] Result received, sentAnyText:', sentAnyText);
+      // Only send result text if we haven't sent any text blocks yet
+      // (avoids duplication for simple responses)
+      if (!sentAnyText && data.result && typeof data.result === 'string') {
+        console.log('[claude] Sending final result text (no prior text sent)');
+        onEvent({ type: 'text', text: data.result });
+      }
       onEvent({ type: 'done' });
     }
   };
