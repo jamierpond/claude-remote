@@ -1,16 +1,28 @@
 import { spawn, ChildProcess } from 'child_process';
 
 export interface ClaudeEvent {
-  type: 'thinking' | 'text' | 'error' | 'done';
+  type: 'thinking' | 'text' | 'error' | 'done' | 'session_init';
   text?: string;
+  sessionId?: string;
 }
 
 export function spawnClaude(
   message: string,
   onEvent: (event: ClaudeEvent) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  sessionId?: string | null
 ): ChildProcess {
-  const args = ['--print', '--output-format', 'stream-json', '--verbose', '-p', message];
+  const args = ['--output-format', 'stream-json', '--verbose'];
+
+  if (sessionId) {
+    // Resume existing session
+    args.push('--resume', sessionId, '-p', message);
+    console.log('[claude] Resuming session:', sessionId);
+  } else {
+    // New session
+    args.push('--print', '-p', message);
+    console.log('[claude] Starting new session');
+  }
 
   console.log('='.repeat(60));
   console.log('[claude] SPAWNING PROCESS');
@@ -74,7 +86,11 @@ export function spawnClaude(
 
     // Handle the actual Claude CLI stream-json format
     if (data.type === 'system' && data.subtype === 'init') {
-      console.log('[claude] Session initialized');
+      const newSessionId = data.session_id;
+      console.log('[claude] Session initialized, ID:', newSessionId);
+      if (newSessionId) {
+        onEvent({ type: 'session_init', sessionId: newSessionId });
+      }
     } else if (data.type === 'assistant' && data.message) {
       // Extract content from the message
       const content = data.message.content;
@@ -88,10 +104,29 @@ export function spawnClaude(
             onEvent({ type: 'text', text: block.text });
             sentAnyText = true;
           } else if (block.type === 'tool_use') {
-            // Show tool use activity to user
+            // Show tool use activity with context
             const toolName = block.name || 'unknown';
-            console.log('[claude] Tool use:', toolName);
-            onEvent({ type: 'thinking', text: `[Using tool: ${toolName}]\n` });
+            const input = block.input || {};
+            let context = '';
+
+            // Extract useful context based on tool type
+            if (input.file_path) {
+              context = ` → ${input.file_path}`;
+            } else if (input.command) {
+              const cmd = input.command.substring(0, 60);
+              context = ` → ${cmd}${input.command.length > 60 ? '...' : ''}`;
+            } else if (input.pattern) {
+              context = ` → ${input.pattern}`;
+            } else if (input.query) {
+              context = ` → "${input.query.substring(0, 40)}..."`;
+            } else if (input.url) {
+              context = ` → ${input.url}`;
+            } else if (input.prompt) {
+              context = ` → "${input.prompt.substring(0, 40)}..."`;
+            }
+
+            console.log('[claude] Tool use:', toolName, context);
+            onEvent({ type: 'thinking', text: `[${toolName}${context}]\n` });
           }
         }
       }

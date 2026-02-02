@@ -106,12 +106,29 @@ export async function verifyPin(pin: string, hash: string): Promise<boolean> {
 export function loadConversation(): Conversation {
   try {
     const path = join(CONFIG_DIR, 'conversation.json');
-    if (!existsSync(path)) return { messages: [], updatedAt: new Date().toISOString() };
-    return JSON.parse(readFileSync(path, 'utf8'));
+    if (!existsSync(path)) return { messages: [], claudeSessionId: null, updatedAt: new Date().toISOString() };
+    const data = JSON.parse(readFileSync(path, 'utf8'));
+    // Ensure claudeSessionId exists for backwards compatibility
+    if (!('claudeSessionId' in data)) {
+      data.claudeSessionId = null;
+    }
+    return data;
   } catch (err) {
     console.error('[store] Failed to load conversation:', err);
-    return { messages: [], updatedAt: new Date().toISOString() };
+    return { messages: [], claudeSessionId: null, updatedAt: new Date().toISOString() };
   }
+}
+
+export function saveClaudeSessionId(sessionId: string): void {
+  const conversation = loadConversation();
+  conversation.claudeSessionId = sessionId;
+  saveConversation(conversation);
+  console.log('[store] Claude session ID saved:', sessionId);
+}
+
+export function getClaudeSessionId(): string | null {
+  const conversation = loadConversation();
+  return conversation.claudeSessionId;
 }
 
 export function saveConversation(conversation: Conversation): void {
@@ -130,7 +147,7 @@ export function addMessage(message: Message): Conversation {
 
 export function clearConversation(): void {
   ensureConfigDir();
-  const empty: Conversation = { messages: [], updatedAt: new Date().toISOString() };
+  const empty: Conversation = { messages: [], claudeSessionId: null, updatedAt: new Date().toISOString() };
   writeFileSync(join(CONFIG_DIR, 'conversation.json'), JSON.stringify(empty, null, 2));
-  console.log('[store] Conversation cleared');
+  console.log('[store] Conversation and session cleared');
 }

@@ -25,6 +25,8 @@ import {
   loadConversation,
   addMessage,
   clearConversation,
+  getClaudeSessionId,
+  saveClaudeSessionId,
   Device,
   ServerState,
   Message,
@@ -339,7 +341,17 @@ async function main() {
         let assistantThinking = '';
         let assistantText = '';
 
+        // Get existing session ID for continuity
+        const sessionId = getClaudeSessionId();
+        console.log('Using Claude session:', sessionId || 'new session');
+
         spawnClaude(userText, (event: ClaudeEvent) => {
+          // Don't forward session_init to client, just save it
+          if (event.type === 'session_init' && event.sessionId) {
+            saveClaudeSessionId(event.sessionId);
+            return;
+          }
+
           sendEncrypted(event);
 
           // Collect response for saving
@@ -358,7 +370,7 @@ async function main() {
               });
             }
           }
-        }, abortController.signal);
+        }, abortController.signal, sessionId);
       } else if (msg.type === 'cancel') {
         console.log('Cancel requested');
         if (abortController) {
