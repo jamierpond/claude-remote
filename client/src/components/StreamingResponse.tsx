@@ -72,7 +72,7 @@ function renderInline(text: string): React.ReactNode[] {
     if (linkMatch) {
       parts.push(
         <a key={key++} href={linkMatch[2]} target="_blank" rel="noopener noreferrer"
-           className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 underline decoration-blue-400/50 hover:decoration-blue-300 underline-offset-2">
+           className="inline-flex items-center gap-1 text-pink-400 hover:text-pink-300 underline decoration-pink-400/50 hover:decoration-pink-300 underline-offset-2">
           {linkMatch[1]}
           <svg className="w-3 h-3 shrink-0" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M4.25 5.5a.75.75 0 00-.75.75v8.5c0 .414.336.75.75.75h8.5a.75.75 0 00.75-.75v-4a.75.75 0 011.5 0v4A2.25 2.25 0 0112.75 17h-8.5A2.25 2.25 0 012 14.75v-8.5A2.25 2.25 0 014.25 4h5a.75.75 0 010 1.5h-5zm7.25-1.25a.75.75 0 01.75-.75h4.5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0V6.31l-5.72 5.72a.75.75 0 11-1.06-1.06l5.72-5.72h-2.69a.75.75 0 01-.75-.75z" clipRule="evenodd" />
@@ -96,7 +96,7 @@ function renderInline(text: string): React.ReactNode[] {
         : cleanUrl;
       parts.push(
         <a key={key++} href={cleanUrl} target="_blank" rel="noopener noreferrer"
-           className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 underline decoration-blue-400/50 hover:decoration-blue-300 underline-offset-2 break-all">
+           className="inline-flex items-center gap-1 text-pink-400 hover:text-pink-300 underline decoration-pink-400/50 hover:decoration-pink-300 underline-offset-2 break-all">
           {displayUrl}
           <svg className="w-3 h-3 shrink-0" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M4.25 5.5a.75.75 0 00-.75.75v8.5c0 .414.336.75.75.75h8.5a.75.75 0 00.75-.75v-4a.75.75 0 011.5 0v4A2.25 2.25 0 0112.75 17h-8.5A2.25 2.25 0 012 14.75v-8.5A2.25 2.25 0 014.25 4h5a.75.75 0 010 1.5h-5zm7.25-1.25a.75.75 0 01.75-.75h4.5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0V6.31l-5.72 5.72a.75.75 0 11-1.06-1.06l5.72-5.72h-2.69a.75.75 0 01-.75-.75z" clipRule="evenodd" />
@@ -230,7 +230,7 @@ function TextBlock({ text, isStreaming }: { text: string; isStreaming?: boolean 
 
   // Add streaming cursor to the last element
   if (isStreaming && elements.length > 0) {
-    const cursor = <span key="cursor" className="inline-block w-2 h-4 bg-blue-400 ml-0.5 animate-pulse" />;
+    const cursor = <span key="cursor" className="inline-block w-2 h-4 bg-pink-400 ml-0.5 animate-pulse" />;
     const last = elements[elements.length - 1];
     // Wrap last element with cursor
     elements[elements.length - 1] = (
@@ -296,7 +296,7 @@ export default function StreamingResponse({
   const phaseLabels: Record<string, { label: string; color: string }> = {
     starting: { label: 'Starting...', color: 'text-gray-400' },
     thinking: { label: 'Thinking...', color: 'text-gray-400' },
-    working: { label: 'Working...', color: 'text-blue-400' },
+    working: { label: 'Working...', color: 'text-pink-400' },
     responding: { label: 'Responding...', color: 'text-green-400' },
     done: { label: 'Done', color: 'text-gray-500' },
   };
@@ -310,7 +310,7 @@ export default function StreamingResponse({
         <div className="flex items-center gap-3 min-w-0 flex-1">
           {isStreaming ? (
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" />
+              <span className="w-2 h-2 bg-pink-400 rounded-full animate-pulse" />
               <span className={`text-sm font-medium ${currentPhase.color}`}>{currentPhase.label}</span>
             </div>
           ) : (

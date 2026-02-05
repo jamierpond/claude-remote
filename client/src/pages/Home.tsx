@@ -260,7 +260,7 @@ export default function Home({ onNavigate, pairInfo }: Props) {
           <div className="flex flex-col gap-3">
             <button
               onClick={() => onNavigate('chat')}
-              className="px-6 py-3 bg-blue-600 rounded-lg font-semibold hover:bg-blue-700 transition-colors text-center"
+              className="px-6 py-3 bg-pink-600 rounded-lg font-semibold hover:bg-pink-700 transition-colors text-center"
             >
               Open Chat
             </button>
@@ -298,7 +298,7 @@ export default function Home({ onNavigate, pairInfo }: Props) {
             value={pairingUrl}
             onChange={(e) => setPairingUrl(e.target.value)}
             placeholder="https://server/pair/token..."
-            className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+            className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-pink-500"
           />
 
           <div className="flex gap-2">
@@ -318,7 +318,7 @@ export default function Home({ onNavigate, pairInfo }: Props) {
             <button
               onClick={doPairing}
               disabled={isPairing || !pairingUrl.trim()}
-              className="flex-1 px-4 py-3 bg-blue-600 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50"
+              className="flex-1 px-4 py-3 bg-pink-600 rounded-lg font-semibold hover:bg-pink-700 transition-colors disabled:opacity-50"
             >
               {isPairing ? 'Pairing...' : 'Pair'}
             </button>

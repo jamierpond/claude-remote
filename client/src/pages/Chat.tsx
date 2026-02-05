@@ -341,8 +341,13 @@ export default function Chat({ token }: Props) {
     }
   }, [currentThinking, currentResponse, currentActivity, isStreaming, scrollToBottom]);
 
-  // Persist open tabs to localStorage
+  // Persist open tabs to localStorage (skip initial render to avoid nuking saved data)
+  const initialRenderRef = useRef(true);
   useEffect(() => {
+    if (initialRenderRef.current) {
+      initialRenderRef.current = false;
+      return;
+    }
     if (openProjects.length > 0) {
       localStorage.setItem('claude-remote-open-projects', JSON.stringify(openProjects));
     } else {
@@ -350,8 +355,13 @@ export default function Chat({ token }: Props) {
     }
   }, [openProjects]);
 
-  // Persist active tab to localStorage
+  // Persist active tab to localStorage (skip initial render)
+  const initialActiveRef = useRef(true);
   useEffect(() => {
+    if (initialActiveRef.current) {
+      initialActiveRef.current = false;
+      return;
+    }
     if (activeProjectId) {
       localStorage.setItem('claude-remote-active-project', activeProjectId);
     } else {
@@ -377,10 +387,33 @@ export default function Chat({ token }: Props) {
         const cachedPin = cachedPinRef.current;
         if (cachedPin) {
           console.log('Found cached PIN, auto-connecting...');
-          cachedPinRef.current = cachedPin;
-          setView('chat'); // Go straight to chat, show reconnecting banner
+
+          // Restore tabs from localStorage immediately (don't wait for auth_ok)
+          const savedProjects = localStorage.getItem('claude-remote-open-projects');
+          const savedActiveId = localStorage.getItem('claude-remote-active-project');
+          if (savedProjects) {
+            try {
+              const projects: Project[] = JSON.parse(savedProjects);
+              if (projects.length > 0) {
+                setOpenProjects(projects);
+                const newStates = new Map<string, ProjectState>();
+                projects.forEach(p => {
+                  newStates.set(p.id, createEmptyProjectState());
+                });
+                setProjectStates(newStates);
+                const activeId = savedActiveId && projects.find(p => p.id === savedActiveId)
+                  ? savedActiveId
+                  : projects[0].id;
+                setActiveProjectId(activeId);
+                tabsRestoredRef.current = true;
+              }
+            } catch (err) {
+              console.error('Failed to restore saved projects on init:', err);
+            }
+          }
+
+          setView('chat');
           setIsReconnecting(true);
-          // Kick off auto-connect (delayed to allow state to settle)
           setTimeout(() => connectAndAuth(), 0);
         } else {
           console.log('Found pairing but no cached PIN, showing PIN view');
@@ -618,6 +651,15 @@ export default function Chat({ token }: Props) {
               }
             }
             setShowProjectPicker(true);
+          } else {
+            // Tabs already restored (e.g. from cached PIN init) — just fetch conversations
+            const savedProjects = localStorage.getItem('claude-remote-open-projects');
+            if (savedProjects) {
+              try {
+                const projects: Project[] = JSON.parse(savedProjects);
+                projects.forEach(p => fetchProjectConversation(p.id));
+              } catch {}
+            }
           }
         } else if (msg.type === 'auth_error') {
           console.error('Auth failed:', msg.error);
@@ -1030,7 +1072,7 @@ export default function Chat({ token }: Props) {
           {error ? (
             <>
               <p className="text-red-400 mb-4">{error}</p>
-              <a href="/" className="px-6 py-3 bg-blue-600 rounded-lg font-semibold hover:bg-blue-700 transition-colors inline-block">
+              <a href="/" className="px-6 py-3 bg-pink-600 rounded-lg font-semibold hover:bg-pink-700 transition-colors inline-block">
                 Go to Home
               </a>
             </>
@@ -1056,12 +1098,12 @@ export default function Chat({ token }: Props) {
               value={pin}
               onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
               placeholder="Enter PIN"
-              className="w-full p-4 text-2xl text-center bg-gray-800 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full p-4 text-2xl text-center bg-gray-800 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-pink-500"
               autoFocus
             />
             <button
               type="submit"
-              className="w-full p-4 bg-blue-600 rounded-lg font-semibold hover:bg-blue-700 transition-colors"
+              className="w-full p-4 bg-pink-600 rounded-lg font-semibold hover:bg-pink-700 transition-colors"
             >
               Unlock
             </button>
@@ -1164,7 +1206,7 @@ export default function Chat({ token }: Props) {
               <p className="text-gray-400 mb-4">Select a project to start chatting</p>
               <button
                 onClick={() => setShowProjectPicker(true)}
-                className="px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+                className="px-4 py-2 bg-pink-600 rounded-lg hover:bg-pink-700 transition-colors"
               >
                 Open Project
               </button>
@@ -1178,7 +1220,7 @@ export default function Chat({ token }: Props) {
                   // User message - compact bubble on the right
                   <div className="flex justify-end">
                     <div className="max-w-[90%] sm:max-w-[85%]">
-                      <div className="rounded-2xl px-4 py-3 bg-blue-600">
+                      <div className="rounded-2xl px-4 py-3 bg-pink-600">
                         <div className="whitespace-pre-wrap break-words">{msg.content}</div>
                       </div>
                     </div>
@@ -1252,7 +1294,7 @@ export default function Chat({ token }: Props) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder={isStreaming ? "Task running..." : "New task..."}
-            className="flex-1 min-h-[44px] px-4 py-3 bg-gray-800 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 text-base"
+            className="flex-1 min-h-[44px] px-4 py-3 bg-gray-800 rounded-full focus:outline-none focus:ring-2 focus:ring-pink-500 text-base"
           />
           {isStreaming ? (
             <button
@@ -1269,7 +1311,7 @@ export default function Chat({ token }: Props) {
             <button
               type="submit"
               disabled={!input.trim()}
-              className="min-w-[44px] min-h-[44px] flex items-center justify-center bg-blue-600 rounded-full font-semibold hover:bg-blue-700 active:bg-blue-800 transition-colors disabled:opacity-50 disabled:hover:bg-blue-600"
+              className="min-w-[44px] min-h-[44px] flex items-center justify-center bg-pink-600 rounded-full font-semibold hover:bg-pink-700 active:bg-pink-800 transition-colors disabled:opacity-50 disabled:hover:bg-pink-600"
               aria-label="Send"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">

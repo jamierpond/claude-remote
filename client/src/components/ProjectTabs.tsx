@@ -72,14 +72,14 @@ export default function ProjectTabs({
                   group flex items-center gap-2 px-3 py-2 text-sm font-medium whitespace-nowrap
                   border-r border-gray-700 transition-colors min-w-0
                   ${isActive
-                    ? 'bg-gray-900 text-white border-b-2 border-b-blue-500'
+                    ? 'bg-gray-900 text-white border-b-2 border-b-pink-500'
                     : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
                   }
                 `}
               >
                 {/* Streaming indicator */}
                 {isStreaming && (
-                  <span className="w-2 h-2 bg-blue-400 rounded-full animate-pulse flex-shrink-0" />
+                  <span className="w-2 h-2 bg-pink-400 rounded-full animate-pulse flex-shrink-0" />
                 )}
 
                 {/* Project name */}

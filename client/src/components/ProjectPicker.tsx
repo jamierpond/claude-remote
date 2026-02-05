@@ -79,7 +79,7 @@ export default function ProjectPicker({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search projects..."
-            className="w-full px-4 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full px-4 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-pink-500"
           />
         </div>
 
@@ -87,7 +87,7 @@ export default function ProjectPicker({
         <div className="flex-1 overflow-y-auto p-2">
           {loading ? (
             <div className="flex items-center justify-center py-8">
-              <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              <div className="w-6 h-6 border-2 border-pink-500 border-t-transparent rounded-full animate-spin" />
             </div>
           ) : error ? (
             <div className="text-center py-8 text-red-400">
@@ -133,7 +133,7 @@ export default function ProjectPicker({
                       <div className="flex items-center gap-2">
                         <span className="font-medium truncate">{project.name}</span>
                         {isOpen && (
-                          <span className="text-xs bg-blue-600 px-1.5 py-0.5 rounded">Open</span>
+                          <span className="text-xs bg-pink-600 px-1.5 py-0.5 rounded">Open</span>
                         )}
                       </div>
                       <div className="text-xs text-gray-500 truncate">
