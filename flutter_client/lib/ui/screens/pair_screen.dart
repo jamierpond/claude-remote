@@ -39,9 +39,8 @@ class _PairScreenState extends ConsumerState<PairScreen> {
   }
 
   /// Parse a pairing URL and extract server URL + token
-  /// Format: https://ai-server.pond.audio/pair/TOKEN
-  /// serverUrl = https://ai-server.pond.audio
-  /// token = TOKEN
+  /// New format: https://client/pair?server=https://server&token=TOKEN
+  /// Old format: https://server/pair/TOKEN
   void _parseUrl(String url, {String source = 'INPUT'}) {
     _addLog('[$source] Parsing: $url');
 
@@ -58,20 +57,30 @@ class _PairScreenState extends ConsumerState<PairScreen> {
 
     _addLog('[$source] host=${uri.host} path=${uri.path}');
 
-    // Format: /pair/TOKEN
-    final segments = uri.pathSegments;
-
+    String? serverUrl;
     String? token;
-    if (segments.length >= 2 && segments[0] == 'pair') {
-      // /pair/TOKEN
-      token = segments[1];
+
+    // New format: /pair?server=...&token=...
+    final serverParam = uri.queryParameters['server'];
+    final tokenParam = uri.queryParameters['token'];
+    if (serverParam != null && tokenParam != null) {
+      serverUrl = serverParam;
+      token = tokenParam;
+      _addLog('[$source] Using new format with query params');
     } else {
-      setState(() => _error = 'Invalid path. Expected /pair/TOKEN, got ${uri.path}');
-      return;
+      // Old format: /pair/TOKEN
+      final segments = uri.pathSegments;
+      if (segments.length >= 2 && segments[0] == 'pair') {
+        token = segments[1];
+        serverUrl = '${uri.scheme}://${uri.host}${uri.hasPort ? ':${uri.port}' : ''}';
+        _addLog('[$source] Using old format, server from host');
+      }
     }
 
-    // Server URL is the base URL (strip the path)
-    final serverUrl = '${uri.scheme}://${uri.host}${uri.hasPort ? ':${uri.port}' : ''}';
+    if (token == null || serverUrl == null) {
+      setState(() => _error = 'Invalid URL. Expected /pair?server=...&token=... or /pair/TOKEN');
+      return;
+    }
 
     _addLog('[$source] serverUrl=$serverUrl token=$token');
 

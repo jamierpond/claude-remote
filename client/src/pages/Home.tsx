@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import type { PairInfo } from '../App';
 
 interface Props {
   onNavigate: (route: 'home' | 'chat' | 'pair') => void;
+  pairInfo?: PairInfo | null;
 }
 
 interface DeviceInfo {
@@ -51,7 +53,7 @@ async function deriveSharedSecret(privateKey: CryptoKey, publicKey: CryptoKey): 
   return crypto.subtle.importKey('raw', hash, { name: 'AES-GCM' }, true, ['encrypt', 'decrypt']);
 }
 
-export default function Home({ onNavigate }: Props) {
+export default function Home({ onNavigate, pairInfo }: Props) {
   const [status, setStatus] = useState<Status | null>(null);
   const [unpairing, setUnpairing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +62,7 @@ export default function Home({ onNavigate }: Props) {
   const [pairingUrl, setPairingUrl] = useState('');
   const [isPairing, setIsPairing] = useState(false);
   const [pairingLog, setPairingLog] = useState<string[]>([]);
+  const autoPairingStarted = useRef(false);
 
   const addLog = (msg: string) => {
     console.log(msg);
@@ -81,6 +84,14 @@ export default function Home({ onNavigate }: Props) {
     fetchStatus();
   }, []);
 
+  // Auto-pair if pairInfo is provided from URL
+  useEffect(() => {
+    if (pairInfo && !autoPairingStarted.current) {
+      autoPairingStarted.current = true;
+      doPairingWithInfo(pairInfo.serverUrl, pairInfo.token);
+    }
+  }, [pairInfo]);
+
   const handleUnpair = async () => {
     setUnpairing(true);
     try {
@@ -100,34 +111,47 @@ export default function Home({ onNavigate }: Props) {
   };
 
   // Parse pairing URL and extract server + token
+  // Supports both formats:
+  // - New: https://client/pair?server=https://server&token=TOKEN
+  // - Old: https://server/pair/TOKEN
   const parseUrl = (url: string): { serverUrl: string; token: string } | null => {
     try {
       const uri = new URL(url.trim());
+      const params = new URLSearchParams(uri.search);
       const segments = uri.pathname.split('/').filter(Boolean);
 
-      // Expected: /pair/TOKEN
+      // New format: /pair?server=...&token=...
+      const serverParam = params.get('server');
+      const tokenParam = params.get('token');
+      if (serverParam && tokenParam) {
+        return { serverUrl: serverParam, token: tokenParam };
+      }
+
+      // Old format: /pair/TOKEN (server is the URL host)
       if (segments.length >= 2 && segments[0] === 'pair') {
         const token = segments[1];
         const serverUrl = `${uri.protocol}//${uri.host}`;
         return { serverUrl, token };
       }
+
       return null;
     } catch {
       return null;
     }
   };
 
-  const doPairing = async () => {
-    setPairingLog([]);
-    setError(null);
-
+  const doPairing = () => {
     const parsed = parseUrl(pairingUrl);
     if (!parsed) {
-      setError('Invalid URL. Expected format: https://server/pair/TOKEN');
+      setError('Invalid URL. Expected format: https://server/pair?server=...&token=... or https://server/pair/TOKEN');
       return;
     }
+    doPairingWithInfo(parsed.serverUrl, parsed.token);
+  };
 
-    const { serverUrl, token } = parsed;
+  const doPairingWithInfo = async (serverUrl: string, token: string) => {
+    setPairingLog([]);
+    setError(null);
     addLog(`Server: ${serverUrl}`);
     addLog(`Token: ${token}`);
 

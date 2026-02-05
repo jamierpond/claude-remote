@@ -4,20 +4,28 @@ import Chat from './pages/Chat';
 
 type Route = 'home' | 'chat' | 'pair';
 
+export interface PairInfo {
+  serverUrl: string;
+  token: string;
+}
+
 export default function App() {
   const [route, setRoute] = useState<Route>('home');
-  const [pairToken, setPairToken] = useState<string | null>(null);
+  const [pairInfo, setPairInfo] = useState<PairInfo | null>(null);
 
   useEffect(() => {
     const path = window.location.pathname;
     const params = new URLSearchParams(window.location.search);
 
-    if (path.startsWith('/pair/')) {
-      const token = path.split('/pair/')[1];
-      setPairToken(token);
+    if (path === '/pair' || path.startsWith('/pair')) {
+      // New format: /pair?server=...&token=...
+      const server = params.get('server');
+      const token = params.get('token');
+      if (server && token) {
+        setPairInfo({ serverUrl: server, token });
+      }
       setRoute('pair');
-    } else if (path === '/chat' || params.get('token')) {
-      setPairToken(params.get('token'));
+    } else if (path === '/chat') {
       setRoute('chat');
     } else {
       setRoute('home');
@@ -33,9 +41,10 @@ export default function App() {
     setRoute(newRoute);
   };
 
-  if (route === 'home') {
-    return <Home onNavigate={navigate} />;
+  // Home handles both unpaired state and pair route (with pairInfo)
+  if (route === 'home' || route === 'pair') {
+    return <Home onNavigate={navigate} pairInfo={pairInfo} />;
   }
 
-  return <Chat token={pairToken} onNavigate={navigate} />;
+  return <Chat onNavigate={navigate} />;
 }
