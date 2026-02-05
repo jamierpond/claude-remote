@@ -28,7 +28,23 @@ export default function App() {
     } else if (path === '/chat') {
       setRoute('chat');
     } else {
-      setRoute('home');
+      // Auto-redirect to chat if paired + have cached PIN
+      const isPaired = localStorage.getItem('claude-remote-paired');
+      const hasCachedPin = (() => {
+        try {
+          const stored = localStorage.getItem('claude-remote-pin');
+          if (!stored) return false;
+          const { exp } = JSON.parse(stored);
+          return Date.now() <= exp;
+        } catch { return false; }
+      })();
+
+      if (isPaired && hasCachedPin) {
+        window.history.replaceState({}, '', '/chat');
+        setRoute('chat');
+      } else {
+        setRoute('home');
+      }
     }
   }, []);
 

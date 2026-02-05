@@ -159,6 +159,28 @@ export default function Chat({ token }: Props) {
   const sharedKeyRef = useRef<CryptoKey | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Reconnection state
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
+  const reconnectAttemptRef = useRef(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cachedPinRef = useRef<string | null>((() => {
+    try {
+      const stored = localStorage.getItem('claude-remote-pin');
+      if (!stored) return null;
+      const { pin, exp } = JSON.parse(stored);
+      if (Date.now() > exp) {
+        localStorage.removeItem('claude-remote-pin');
+        return null;
+      }
+      return pin as string;
+    } catch {
+      localStorage.removeItem('claude-remote-pin');
+      return null;
+    }
+  })());
+  const intentionalCloseRef = useRef(false);
+
   // Helper to get current project state
   const getProjectState = useCallback((projectId: string | null): ProjectState => {
     if (!projectId) return createEmptyProjectState();
@@ -296,22 +318,13 @@ export default function Chat({ token }: Props) {
   }, [updateProjectState]);
 
   const clearHistory = async () => {
-    if (!activeProjectId) {
-      alert('No project selected');
-      return;
-    }
-    console.log(`Clearing conversation history for project: ${activeProjectId}`);
+    if (!activeProjectId) return;
     try {
       const res = await fetch(`/api/projects/${encodeURIComponent(activeProjectId)}/conversation`, { method: 'DELETE' });
-      if (!res.ok) {
-        throw new Error(`Failed to clear history: ${res.status}`);
-      }
+      if (!res.ok) throw new Error(`Failed to clear history: ${res.status}`);
       updateProjectState(activeProjectId, state => ({ ...state, messages: [] }));
-      console.log('History cleared');
     } catch (err) {
-      const msg = `Failed to clear history: ${err}`;
-      console.error(msg);
-      alert(msg);
+      setError(`Failed to clear history: ${err}`);
     }
   };
 
@@ -354,21 +367,30 @@ export default function Chat({ token }: Props) {
       localStorage.removeItem('claude-remote-device-id');
       localStorage.removeItem('claude-remote-private-key');
       localStorage.removeItem('claude-remote-server-public-key');
+      localStorage.removeItem('claude-remote-pin');
+      cachedPinRef.current = null;
       // Stay in 'pairing' view, completePairing will run
     } else {
       const stored = localStorage.getItem('claude-remote-paired');
-      console.log('No token, checking localStorage:', { stored });
       if (stored) {
-        console.log('Found pairing, showing PIN view');
-        setView('pin');
+        // Check if we have a cached PIN — auto-connect if so
+        const cachedPin = cachedPinRef.current;
+        if (cachedPin) {
+          console.log('Found cached PIN, auto-connecting...');
+          cachedPinRef.current = cachedPin;
+          setView('chat'); // Go straight to chat, show reconnecting banner
+          setIsReconnecting(true);
+          // Kick off auto-connect (delayed to allow state to settle)
+          setTimeout(() => connectAndAuth(), 0);
+        } else {
+          console.log('Found pairing but no cached PIN, showing PIN view');
+          setView('pin');
+        }
       } else {
-        const msg = 'Not paired. Go to home page to scan QR code.';
-        console.error(msg);
-        alert(msg);
-        setError(msg);
+        setError('Not paired. Go to home page to scan QR code.');
       }
     }
-  }, [token]);
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pairingStarted = useRef(false);
 
@@ -382,19 +404,16 @@ export default function Chat({ token }: Props) {
     const getRes = await fetch(`/pair/${token}`);
     if (!getRes.ok) {
       const data = await getRes.json().catch(() => ({}));
-      const msg = `FATAL: Failed to get server key: ${data.error || getRes.status}`;
+      const msg = `Failed to get server key: ${data.error || getRes.status}`;
       console.error(msg, data);
-      alert(msg);
       setError(msg);
       throw new Error(msg);
     }
     const getData = await getRes.json();
-    console.log('Got server response:', getData);
     const { serverPublicKey } = getData;
     if (!serverPublicKey) {
-      const msg = 'FATAL: Server returned empty public key';
+      const msg = 'Server returned empty public key';
       console.error(msg, getData);
-      alert(msg);
       setError(msg);
       throw new Error(msg);
     }
@@ -469,6 +488,24 @@ export default function Chat({ token }: Props) {
     sharedKeyRef.current = sharedKey;
   }, []);
 
+  // Schedule a reconnection attempt with exponential backoff
+  const scheduleReconnect = useCallback(() => {
+    if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+    const attempt = reconnectAttemptRef.current;
+    const delay = Math.min(1000 * Math.pow(2, attempt), 30000); // 1s, 2s, 4s, ... 30s max
+    console.log(`[reconnect] Scheduling attempt ${attempt + 1} in ${delay}ms`);
+    reconnectAttemptRef.current = attempt + 1;
+    setReconnectAttempt(attempt + 1);
+    setIsReconnecting(true);
+    reconnectTimerRef.current = setTimeout(() => {
+      connectAndAuth();
+    }, delay);
+  }, []); // connectAndAuth referenced below via ref
+
+  // Ref to break circular dependency between connectWebSocket and scheduleReconnect
+  const scheduleReconnectRef = useRef(scheduleReconnect);
+  scheduleReconnectRef.current = scheduleReconnect;
+
   const connectWebSocket = useCallback((): Promise<WebSocket> => {
     return new Promise((resolve, reject) => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -481,10 +518,8 @@ export default function Chat({ token }: Props) {
 
       ws.onmessage = async (event) => {
         if (!sharedKeyRef.current) {
-          const err = 'FATAL: Received WebSocket message but sharedKeyRef is null - this should never happen';
-          console.error(err);
-          alert(err);
-          setError(err);
+          console.error('[ws] Received message but sharedKeyRef is null');
+          setError('Encryption key missing - please refresh the page');
           return;
         }
 
@@ -492,10 +527,7 @@ export default function Chat({ token }: Props) {
         try {
           encrypted = JSON.parse(event.data);
         } catch (err) {
-          const msg = `FATAL: Failed to parse WebSocket message as JSON: ${err}`;
-          console.error(msg, event.data);
-          alert(msg);
-          setError(msg);
+          console.error('[ws] Failed to parse message as JSON:', err);
           return;
         }
 
@@ -503,10 +535,8 @@ export default function Chat({ token }: Props) {
         try {
           decrypted = await decrypt(encrypted, sharedKeyRef.current);
         } catch (err) {
-          const msg = `FATAL: Decryption failed - crypto keys likely mismatched. Clear localStorage and re-pair. Error: ${err}`;
-          console.error(msg, err, encrypted);
-          alert(msg);
-          setError(msg);
+          console.error('[ws] Decryption failed:', err);
+          setError('Decryption failed - keys may be mismatched. Try clearing data and re-pairing.');
           return;
         }
 
@@ -524,10 +554,7 @@ export default function Chat({ token }: Props) {
         try {
           msg = JSON.parse(decrypted);
         } catch (err) {
-          const errMsg = `FATAL: Failed to parse decrypted message as JSON: ${err}`;
-          console.error(errMsg, decrypted);
-          alert(errMsg);
-          setError(errMsg);
+          console.error('[ws] Failed to parse decrypted message:', err);
           return;
         }
 
@@ -535,16 +562,18 @@ export default function Chat({ token }: Props) {
         const projectId = msg.projectId;
 
         if (msg.type === 'auth_ok') {
+          // Successful auth — clear reconnection state
           setError('');
           setView('chat');
+          setIsReconnecting(false);
+          setReconnectAttempt(0);
+          reconnectAttemptRef.current = 0;
 
           // Set streaming indicators for any active jobs
-          // Server sends activeProjectIds which we trust - pending events will fill in the content
           const activeIds = msg.activeProjectIds || [];
           if (activeIds.length > 0) {
             console.log('Active streaming projects on reconnect:', activeIds);
             setStreamingProjectIds(new Set(activeIds.filter(id => id !== '__global__')));
-            // Mark these projects as streaming so UI shows the indicator
             activeIds.forEach(projectId => {
               if (projectId !== '__global__') {
                 updateProjectState(projectId, state => ({
@@ -566,7 +595,6 @@ export default function Chat({ token }: Props) {
                 const projects: Project[] = JSON.parse(savedProjects);
                 if (projects.length > 0) {
                   setOpenProjects(projects);
-                  // Initialize state for each project (mark as streaming if active)
                   const newStates = new Map<string, ProjectState>();
                   projects.forEach(p => {
                     const isStreaming = activeIds.includes(p.id);
@@ -576,13 +604,10 @@ export default function Chat({ token }: Props) {
                     });
                   });
                   setProjectStates(newStates);
-                  // Restore active project or default to first
                   const activeId = savedActiveId && projects.find(p => p.id === savedActiveId)
                     ? savedActiveId
                     : projects[0].id;
                   setActiveProjectId(activeId);
-                  // Fetch conversation history for all open projects
-                  // Pending WebSocket events will restore any in-progress streaming content
                   projects.forEach(p => {
                     fetchProjectConversation(p.id);
                   });
@@ -592,17 +617,19 @@ export default function Chat({ token }: Props) {
                 console.error('Failed to restore saved projects:', err);
               }
             }
-            // No saved projects, show picker
             setShowProjectPicker(true);
           }
         } else if (msg.type === 'auth_error') {
-          const errMsg = `AUTH FAILED: ${msg.error || 'Unknown auth error'}`;
-          console.error(errMsg);
-          alert(errMsg);
-          setError(errMsg);
+          console.error('Auth failed:', msg.error);
+          // PIN was wrong — clear cached PIN, drop to PIN screen
+          cachedPinRef.current = null;
+          localStorage.removeItem('claude-remote-pin');
+          setIsReconnecting(false);
+          setReconnectAttempt(0);
+          reconnectAttemptRef.current = 0;
+          setError(msg.error || 'Authentication failed - please re-enter PIN');
+          setView('pin');
         } else if (msg.type === 'streaming_restore' && projectId) {
-          // Restore accumulated streaming state from server
-          // This arrives BEFORE pending delta events, so we SET (not append)
           console.log(`Restoring streaming state for ${projectId}:`, {
             thinking: msg.thinking?.length || 0,
             text: msg.text?.length || 0,
@@ -672,14 +699,12 @@ export default function Chat({ token }: Props) {
           const response = responseRefs.current.get(projectId) || '';
           const activity = activityRefs.current.get(projectId) || [];
 
-          // Clear streaming state
           setStreamingProjectIds(prev => {
             const next = new Set(prev);
             next.delete(projectId);
             return next;
           });
 
-          // Add message to project state
           updateProjectState(projectId, state => {
             const task = state.currentTask;
             const startedAt = state.taskStartTime ? new Date(state.taskStartTime).toISOString() : undefined;
@@ -707,15 +732,12 @@ export default function Chat({ token }: Props) {
             };
           });
 
-          // Clear refs
           thinkingRefs.current.delete(projectId);
           responseRefs.current.delete(projectId);
           activityRefs.current.delete(projectId);
         } else if (msg.type === 'error') {
-          const errMsg = `SERVER ERROR: ${msg.error || 'Unknown server error'}`;
-          console.error(errMsg);
-          alert(errMsg);
-          setError(errMsg);
+          console.error('Server error:', msg.error);
+          setError(msg.error || 'Unknown server error');
           if (projectId) {
             setStreamingProjectIds(prev => {
               const next = new Set(prev);
@@ -728,147 +750,143 @@ export default function Chat({ token }: Props) {
             }));
           }
         } else {
-          console.log('Unknown or unhandled message type:', msg.type, msg);
+          console.log('Unknown message type:', msg.type, msg);
         }
       };
 
       ws.onclose = (event) => {
-        console.log(`WebSocket CLOSED: code=${event.code} reason="${event.reason || 'none'}"`);
+        console.log(`[ws] Closed: code=${event.code} reason="${event.reason || 'none'}"`);
         wsRef.current = null;
-        // Clear all streaming states
-        setStreamingProjectIds(new Set());
-        setProjectStates(prev => {
-          const next = new Map(prev);
-          for (const [id, state] of next) {
-            if (state.isStreaming) {
-              next.set(id, { ...state, isStreaming: false });
-            }
-          }
-          return next;
-        });
+
+        // Don't reconnect if we closed intentionally
+        if (intentionalCloseRef.current) {
+          intentionalCloseRef.current = false;
+          return;
+        }
+
         if (event.code !== 1000) {
-          // Connection lost unexpectedly - go back to PIN view to reconnect
-          setError('Connection lost. Please re-enter PIN to reconnect.');
-          setView('pin');
+          // Unexpected close — try to auto-reconnect if we have a cached PIN
+          if (cachedPinRef.current) {
+            // DON'T clear streaming state — server keeps jobs running, we'll restore on reconnect
+            scheduleReconnectRef.current();
+          } else {
+            // No cached PIN — must go to PIN screen
+            setError('Connection lost. Please re-enter PIN.');
+            setView('pin');
+          }
         }
       };
 
       ws.onerror = (event) => {
-        const msg = 'FATAL: WebSocket connection failed';
-        console.error(msg, event);
-        alert(msg);
-        setError(msg);
-        reject(new Error(msg));
+        // Just log — onclose will fire after this and handle reconnection
+        console.error('[ws] Connection error', event);
+        reject(new Error('WebSocket connection failed'));
       };
     });
   }, [updateProjectState]);
 
+  // Connect + authenticate in one shot (used by reconnect loop and auto-login)
+  const connectAndAuth = useCallback(async () => {
+    const pinToUse = cachedPinRef.current;
+    if (!pinToUse) {
+      console.log('[reconnect] No cached PIN, dropping to PIN screen');
+      setIsReconnecting(false);
+      setReconnectAttempt(0);
+      setView('pin');
+      return;
+    }
+
+    // Ensure shared key is ready
+    if (!sharedKeyRef.current) {
+      try {
+        await restoreSharedKey();
+      } catch (err) {
+        console.error('[reconnect] Failed to restore shared key:', err);
+        setIsReconnecting(false);
+        setError('Encryption key restore failed - please refresh');
+        setView('pin');
+        return;
+      }
+    }
+
+    try {
+      await connectWebSocket();
+    } catch {
+      // onclose handler will schedule next reconnect
+      return;
+    }
+
+    // Send auth
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && sharedKeyRef.current) {
+      try {
+        const encrypted = await encrypt(
+          JSON.stringify({ type: 'auth', pin: pinToUse }),
+          sharedKeyRef.current
+        );
+        wsRef.current.send(JSON.stringify(encrypted));
+        console.log('[reconnect] Auth sent');
+      } catch (err) {
+        console.error('[reconnect] Failed to send auth:', err);
+        // Will get closed, onclose will retry
+      }
+    }
+  }, [connectWebSocket, restoreSharedKey]);
+
+  // Clean up reconnect timer on unmount
+  useEffect(() => {
+    return () => {
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+    };
+  }, []);
+
+  // Auto-dismiss errors after 8 seconds (unless it's a pairing/key error that needs action)
+  useEffect(() => {
+    if (!error) return;
+    const timer = setTimeout(() => setError(''), 8000);
+    return () => clearTimeout(timer);
+  }, [error]);
+
   const handlePinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('handlePinSubmit called', { pin: pin ? `${pin.length} digits` : 'empty' });
 
     if (!pin || pin.length < 4) {
-      const msg = 'PIN must be at least 4 digits';
-      alert(msg);
-      setError(msg);
+      setError('PIN must be at least 4 digits');
       return;
     }
 
-    if (!sharedKeyRef.current) {
-      try {
-        console.log('Restoring shared key...');
-        await restoreSharedKey();
-        console.log('Shared key restored');
-      } catch (err) {
-        const msg = `FATAL: Failed to restore encryption keys: ${err}`;
-        console.error(msg, err);
-        alert(msg);
-        setError(msg);
-        return;
-      }
-    }
+    // Cache the PIN for auto-reconnect
+    cachedPinRef.current = pin;
+    localStorage.setItem('claude-remote-pin', JSON.stringify({ pin, exp: Date.now() + 24 * 60 * 60 * 1000 }));
 
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      try {
-        console.log('Connecting WebSocket...');
-        await connectWebSocket();
-        console.log('WebSocket connected');
-      } catch (err) {
-        const msg = `FATAL: WebSocket connection failed: ${err}`;
-        console.error(msg);
-        alert(msg);
-        setError(msg);
-        return;
-      }
-    }
-
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      const err = `FATAL: WebSocket not connected after connect attempt (state: ${wsRef.current?.readyState ?? 'null'})`;
-      console.error(err);
-      alert(err);
-      setError(err);
-      return;
-    }
-
-    if (!sharedKeyRef.current) {
-      const err = 'FATAL: Shared key is null after restore - cannot encrypt';
-      console.error(err);
-      alert(err);
-      setError(err);
-      return;
-    }
-
-    console.log('Sending auth message...');
-    const encrypted = await encrypt(
-      JSON.stringify({ type: 'auth', pin }),
-      sharedKeyRef.current
-    );
-    wsRef.current.send(JSON.stringify(encrypted));
-    console.log('Auth message sent');
+    setError('');
+    await connectAndAuth();
   };
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('handleSend called', { input, isStreaming, activeProjectId, wsRef: wsRef.current, sharedKey: sharedKeyRef.current });
-
-    if (!input.trim()) {
-      return;
-    }
+    if (!input.trim()) return;
 
     if (!activeProjectId) {
-      alert('Please select a project first');
       setShowProjectPicker(true);
       return;
     }
 
-    if (isStreaming) {
-      const msg = 'Already streaming - wait for response or click Cancel';
-      console.error(msg);
-      alert(msg);
-      return;
-    }
+    if (isStreaming) return;
 
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      const err = `FATAL: WebSocket not connected (state: ${wsRef.current?.readyState ?? 'null'}) - cannot send message`;
-      console.error(err);
-      alert(err);
-      setError(err);
+      setError('Not connected - waiting for reconnection...');
       return;
     }
 
     if (!sharedKeyRef.current) {
-      const err = 'FATAL: Shared key is null - cannot encrypt. Re-pair required.';
-      console.error(err);
-      alert(err);
-      setError(err);
+      setError('Encryption key missing - please refresh the page');
       return;
     }
 
     const text = input.trim();
     setInput('');
-    setError(''); // Clear any previous errors
+    setError('');
 
-    // Add user message to project state
     const taskStartTime = Date.now();
     updateProjectState(activeProjectId, state => ({
       ...state,
@@ -881,10 +899,8 @@ export default function Chat({ token }: Props) {
       taskStartTime,
     }));
 
-    // Mark project as streaming
     setStreamingProjectIds(prev => new Set(prev).add(activeProjectId));
 
-    // Clear refs for this project
     thinkingRefs.current.set(activeProjectId, '');
     responseRefs.current.set(activeProjectId, '');
     activityRefs.current.set(activeProjectId, []);
@@ -896,94 +912,50 @@ export default function Chat({ token }: Props) {
       );
       wsRef.current.send(JSON.stringify(encrypted));
     } catch (err) {
-      const msg = `FATAL: Failed to encrypt/send message: ${err}`;
-      console.error(msg, err);
-      alert(msg);
-      setError(msg);
-      // Revert streaming state
-      if (activeProjectId) {
-        setStreamingProjectIds(prev => {
-          const next = new Set(prev);
-          next.delete(activeProjectId);
-          return next;
-        });
-        updateProjectState(activeProjectId, state => ({
-          ...state,
-          isStreaming: false,
-        }));
-      }
+      console.error('[send] Failed:', err);
+      setError(`Failed to send message: ${err}`);
+      setStreamingProjectIds(prev => {
+        const next = new Set(prev);
+        next.delete(activeProjectId);
+        return next;
+      });
+      updateProjectState(activeProjectId, state => ({
+        ...state,
+        isStreaming: false,
+      }));
     }
   };
 
   const handleCancel = async () => {
-    console.log('handleCancel called', { activeProjectId });
+    if (!activeProjectId) return;
 
-    if (!activeProjectId) {
-      console.error('No active project');
-      return;
+    // Optimistic UI update
+    setStreamingProjectIds(prev => {
+      const next = new Set(prev);
+      next.delete(activeProjectId);
+      return next;
+    });
+    updateProjectState(activeProjectId, state => ({
+      ...state,
+      isStreaming: false,
+    }));
+
+    // Try WebSocket cancel
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && sharedKeyRef.current) {
+      try {
+        const encrypted = await encrypt(
+          JSON.stringify({ type: 'cancel', projectId: activeProjectId }),
+          sharedKeyRef.current
+        );
+        wsRef.current.send(JSON.stringify(encrypted));
+      } catch (err) {
+        console.error('[cancel] WS cancel failed:', err);
+      }
     }
 
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      const msg = 'Cannot cancel - WebSocket not connected. Click Reset instead.';
-      console.error(msg);
-      alert(msg);
-      setStreamingProjectIds(prev => {
-        const next = new Set(prev);
-        next.delete(activeProjectId);
-        return next;
-      });
-      updateProjectState(activeProjectId, state => ({
-        ...state,
-        isStreaming: false,
-      }));
-      return;
-    }
-
-    if (!sharedKeyRef.current) {
-      const msg = 'Cannot cancel - no shared key. Click Reset instead.';
-      console.error(msg);
-      alert(msg);
-      setStreamingProjectIds(prev => {
-        const next = new Set(prev);
-        next.delete(activeProjectId);
-        return next;
-      });
-      updateProjectState(activeProjectId, state => ({
-        ...state,
-        isStreaming: false,
-      }));
-      return;
-    }
-
-    try {
-      const encrypted = await encrypt(
-        JSON.stringify({ type: 'cancel', projectId: activeProjectId }),
-        sharedKeyRef.current
-      );
-      wsRef.current.send(JSON.stringify(encrypted));
-      setStreamingProjectIds(prev => {
-        const next = new Set(prev);
-        next.delete(activeProjectId);
-        return next;
-      });
-      updateProjectState(activeProjectId, state => ({
-        ...state,
-        isStreaming: false,
-      }));
-    } catch (err) {
-      const msg = `Failed to send cancel: ${err}`;
-      console.error(msg);
-      alert(msg);
-      setStreamingProjectIds(prev => {
-        const next = new Set(prev);
-        next.delete(activeProjectId);
-        return next;
-      });
-      updateProjectState(activeProjectId, state => ({
-        ...state,
-        isStreaming: false,
-      }));
-    }
+    // Also fire HTTP cancel as fallback (fire and forget)
+    fetch(`/api/projects/${encodeURIComponent(activeProjectId)}/cancel`, { method: 'POST' })
+      .catch(err => console.error('[cancel] HTTP cancel failed:', err));
   };
 
   // Handle project selection from picker
@@ -1148,6 +1120,31 @@ export default function Chat({ token }: Props) {
         </div>
       </header>
 
+      {/* Reconnecting banner */}
+      {isReconnecting && (
+        <div className="flex items-center justify-center gap-2 px-4 py-2 bg-yellow-900/80 border-b border-yellow-700 text-yellow-200 text-sm">
+          <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+          </svg>
+          <span>Reconnecting{reconnectAttempt > 1 ? ` (attempt ${reconnectAttempt})` : ''}...</span>
+          <button
+            onClick={() => {
+              if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+              setIsReconnecting(false);
+              setReconnectAttempt(0);
+              reconnectAttemptRef.current = 0;
+              cachedPinRef.current = null;
+              localStorage.removeItem('claude-remote-pin');
+              setView('pin');
+            }}
+            className="ml-2 px-2 py-0.5 text-xs bg-yellow-800 hover:bg-yellow-700 rounded transition-colors"
+          >
+            Use PIN
+          </button>
+        </div>
+      )}
+
       {/* Project Picker Modal */}
       <ProjectPicker
         isOpen={showProjectPicker}
@@ -1233,10 +1230,20 @@ export default function Chat({ token }: Props) {
 
       {/* Input area */}
       <div className="border-t border-gray-700 bg-gray-900 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4 sm:py-4">
-        {error && (
-          <div className="bg-red-900/80 border border-red-500 rounded-xl p-3 mb-3">
-            <p className="text-red-200 font-bold text-sm">ERROR:</p>
-            <p className="text-red-300 text-sm">{error}</p>
+        {error && !isReconnecting && (
+          <div className="bg-red-900/80 border border-red-500 rounded-xl p-3 mb-3 flex items-start gap-2">
+            <div className="flex-1 min-w-0">
+              <p className="text-red-300 text-sm break-words">{error}</p>
+            </div>
+            <button
+              onClick={() => setError('')}
+              className="shrink-0 text-red-400 hover:text-red-200 transition-colors"
+              aria-label="Dismiss error"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+              </svg>
+            </button>
           </div>
         )}
         <form onSubmit={handleSend} className="flex gap-2 items-end">
