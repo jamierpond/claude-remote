@@ -226,6 +226,15 @@ export function clearConversation(): void {
 // Project-related functions
 // ============================================
 
+export function validateProjectId(projectId: string): boolean {
+  if (!projectId) return false;
+  // Reject path traversal attempts, slashes, backslashes, null bytes
+  if (projectId.includes('..') || projectId.includes('/') || projectId.includes('\\') || projectId.includes('\0')) {
+    return false;
+  }
+  return true;
+}
+
 function ensureProjectsDir() {
   if (!existsSync(PROJECTS_DIR)) {
     mkdirSync(PROJECTS_DIR, { recursive: true });
@@ -233,6 +242,9 @@ function ensureProjectsDir() {
 }
 
 function getProjectConfigDir(projectId: string): string {
+  if (!validateProjectId(projectId)) {
+    throw new Error(`Invalid project ID: ${projectId}`);
+  }
   return join(PROJECTS_DIR, projectId);
 }
 
@@ -427,6 +439,7 @@ export function clearProjectConversation(projectId: string): void {
 
 // Get project by ID (validates it exists)
 export function getProject(projectId: string, basePath?: string): Project | null {
+  if (!validateProjectId(projectId)) return null;
   const projectsBase = basePath || DEFAULT_PROJECTS_BASE;
   const fullPath = join(projectsBase, projectId);
 
