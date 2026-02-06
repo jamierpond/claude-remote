@@ -32,6 +32,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.envrc
 
 # vercel
 .vercel
@@ -42,3 +43,13 @@ next-env.d.ts
 dev.log
 logs/
 dist/
+.direnv/
+
+# Flutter
+flutter_client/.dart_tool/
+flutter_client/.flutter-plugins
+flutter_client/.flutter-plugins-dependencies
+flutter_client/build/
+flutter_client/.packages
+flutter_client/pubspec.lock
+flutter_client/flutter_02.png
