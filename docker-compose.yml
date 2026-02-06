@@ -1,0 +1,29 @@
+services:
+  claude-remote:
+    build: .
+    container_name: claude-remote
+    restart: always
+    ports:
+      - "6767:6767"
+    env_file:
+      - .env.local
+    environment:
+      - NODE_ENV=production
+    volumes:
+      # Pairing state, device keys, conversations
+      - ~/.config/claude-remote:/root/.config/claude-remote
+
+      # Projects the agent can access (sandboxed — only this dir)
+      - ~/projects:/root/projects
+
+      # Claude CLI auth credentials + session state
+      - ~/.claude:/root/.claude
+
+      # Git config so commits have the right author
+      - ~/.gitconfig:/root/.gitconfig:ro
+
+      # SSH keys for git operations (read-only)
+      - ~/.ssh:/root/.ssh:ro
+
+      # Logs persisted to host
+      - ./logs:/app/logs
