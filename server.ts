@@ -51,6 +51,37 @@ import { spawnClaude, ClaudeEvent } from './src/lib/claude';
 const activeJobs: Map<string, AbortController> = new Map();
 // Track connected WebSockets per device
 const connectedClients: Map<string, WebSocket> = new Map();
+// Track which projects have already sent the "rejoined" context note this server boot
+const rejoinNoteSent: Set<string> = new Set();
+
+// Broadcast reload message to all connected clients (for dev hot reload)
+function broadcastReload() {
+  console.log('[dev] Broadcasting reload to', connectedClients.size, 'clients');
+  const devices = loadDevices();
+  for (const [deviceId, ws] of connectedClients.entries()) {
+    if (ws.readyState === WebSocket.OPEN) {
+      const device = devices.find(d => d.id === deviceId);
+      if (device) {
+        const encrypted = encrypt(JSON.stringify({ type: 'reload' }), device.sharedSecret);
+        ws.send(JSON.stringify(encrypted));
+        console.log(`[dev] Sent reload to device ${deviceId}`);
+      }
+    }
+  }
+}
+
+// Broadcast an event to all connected clients except the sender
+function broadcastToOthers(excludeDeviceId: string, event: object) {
+  for (const [connDeviceId, connWs] of connectedClients.entries()) {
+    if (connDeviceId === excludeDeviceId) continue;
+    if (connWs.readyState !== WebSocket.OPEN) continue;
+    const connDevice = devices.find(d => d.id === connDeviceId);
+    if (connDevice) {
+      const encrypted = encrypt(JSON.stringify(event), connDevice.sharedSecret);
+      connWs.send(JSON.stringify(encrypted));
+    }
+  }
+}
 
 // Helper to create job key
 function jobKey(deviceId: string, projectId?: string): string {
@@ -130,10 +161,28 @@ function loadPartialResponses(): Record<string, PartialResponse> {
   } catch { return {}; }
 }
 
-function savePartialResponse(deviceId: string, text: string, thinking: string, activity: ToolActivity[] = []) {
+// Debounced partial response saving — at most once per second
+const pendingPartials: Map<string, { text: string; thinking: string; activity: ToolActivity[] }> = new Map();
+let partialSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flushPartialResponses() {
+  if (pendingPartials.size === 0) return;
   const data = loadPartialResponses();
-  data[deviceId] = { text, thinking, activity, updatedAt: Date.now() };
+  for (const [key, partial] of pendingPartials) {
+    data[key] = { ...partial, updatedAt: Date.now() };
+  }
+  pendingPartials.clear();
   writeFileSync(partialResponseFile, JSON.stringify(data, null, 2));
+}
+
+function savePartialResponse(deviceId: string, text: string, thinking: string, activity: ToolActivity[] = []) {
+  pendingPartials.set(deviceId, { text, thinking, activity });
+  if (!partialSaveTimer) {
+    partialSaveTimer = setTimeout(() => {
+      partialSaveTimer = null;
+      flushPartialResponses();
+    }, 1000);
+  }
 }
 
 function clearPartialResponse(deviceId: string) {
@@ -243,8 +292,51 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       paired: devices.length > 0,
       devices: devices.map(d => ({ id: d.id, createdAt: d.createdAt })),
       deviceCount: devices.length,
-      pairingUrl: serverState.pairingToken ? `${clientUrl}/pair/${serverState.pairingToken}` : null,
+      pairingUrl: serverState.pairingToken ? `${clientUrl}/pair?server=${encodeURIComponent(serverUrl)}&token=${serverState.pairingToken}` : null,
     });
+  }
+
+  // API: Generate new pairing token (invalidates previous one)
+  if (pathname === '/api/new-pair-token' && method === 'POST') {
+    reloadState();
+    serverState.pairingToken = randomBytes(16).toString('hex');
+    saveServerState(serverState);
+    const pairUrl = `${clientUrl}/pair?server=${encodeURIComponent(serverUrl)}&token=${serverState.pairingToken}`;
+    console.log(`> New pairing token generated`);
+    console.log(`> URL: ${pairUrl}`);
+    console.log('');
+    qrcode.generate(pairUrl, { small: true });
+    return json(res, {
+      pairingUrl: pairUrl,
+      token: serverState.pairingToken
+    });
+  }
+
+  // API: Dev reload - broadcasts reload message to all connected clients
+  if (pathname === '/api/dev/reload' && method === 'POST') {
+    broadcastReload();
+    return json(res, { ok: true, clients: connectedClients.size });
+  }
+
+  // API: Dev full reload - triggers Flutter hot restart then broadcasts reload
+  if (pathname === '/api/dev/full-reload' && method === 'POST') {
+    try {
+      // Send SIGUSR2 to Flutter process for hot restart
+      const pidFile = join(process.cwd(), 'logs', 'flutter.pid');
+      if (existsSync(pidFile)) {
+        const pid = readFileSync(pidFile, 'utf-8').trim();
+        process.kill(parseInt(pid), 'SIGUSR2');
+        console.log('[dev] Sent SIGUSR2 to Flutter process', pid);
+      }
+      // Wait for Flutter to rebuild, then broadcast reload
+      setTimeout(() => {
+        broadcastReload();
+      }, 2000);
+      return json(res, { ok: true, message: 'Flutter restart triggered, reload will broadcast in 2s' });
+    } catch (e) {
+      console.error('[dev] Full reload failed:', e);
+      return json(res, { ok: false, error: String(e) }, 500);
+    }
   }
 
   // API: Get conversation history
@@ -325,6 +417,25 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     });
   }
 
+  // API: Cancel task for a project (HTTP fallback for unreliable WebSocket)
+  if (pathname?.startsWith('/api/projects/') && pathname.endsWith('/cancel') && method === 'POST') {
+    const projectId = decodeURIComponent(pathname.split('/api/projects/')[1].replace('/cancel', ''));
+    console.log(`[api] HTTP cancel requested for project: ${projectId}`);
+
+    // Find and abort all active jobs for this project (any device)
+    let cancelled = 0;
+    for (const [key, controller] of activeJobs.entries()) {
+      if (key.endsWith(`:${projectId}`)) {
+        console.log(`[api] Aborting job: ${key}`);
+        controller.abort();
+        activeJobs.delete(key);
+        cancelled++;
+      }
+    }
+
+    return json(res, { ok: true, cancelled });
+  }
+
   // API: Get git status for a project
   if (pathname?.startsWith('/api/projects/') && pathname.endsWith('/git') && method === 'GET') {
     const projectId = decodeURIComponent(pathname.split('/api/projects/')[1].replace('/git', ''));
@@ -349,8 +460,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       }).trim();
       const isDirty = status.length > 0;
 
-      // Count changed files
+      // Parse changed files
       const changedFiles = status ? status.split('\n').length : 0;
+      const files = status ? status.split('\n').map(line => {
+        // Porcelain format: XY PATH (2 status chars + space + path)
+        const match = line.match(/^(..) (.+)$/);
+        return match
+          ? { status: match[1].trim(), path: match[2] }
+          : { status: '?', path: line.trim() };
+      }) : [];
 
       // Get ahead/behind counts (may fail if no upstream)
       let ahead = 0;
@@ -372,6 +490,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         branch,
         isDirty,
         changedFiles,
+        files,
         ahead,
         behind,
       });
@@ -383,9 +502,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   }
 
   // API: Pair GET - get server public key
-  if (pathname?.startsWith('/api/pair/') && method === 'GET') {
+  if (pathname?.startsWith('/pair/') && method === 'GET') {
     reloadState();
-    const token = pathname.split('/api/pair/')[1];
+    const token = pathname.split('/pair/')[1];
 
     if (!serverState || serverState.pairingToken !== token) {
       return json(res, { error: 'Invalid token' }, 400);
@@ -395,9 +514,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   }
 
   // API: Pair POST - complete pairing (allows multiple devices)
-  if (pathname?.startsWith('/api/pair/') && method === 'POST') {
+  if (pathname?.startsWith('/pair/') && method === 'POST') {
     reloadState();
-    const token = pathname.split('/api/pair/')[1];
+    const token = pathname.split('/pair/')[1];
 
     if (!serverState || serverState.pairingToken !== token) {
       return json(res, { error: 'Invalid token' }, 400);
@@ -424,6 +543,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     addDevice(newDevice);
     devices = loadDevices();
     console.log(`> New device paired: ${newDevice.id} (total: ${devices.length})`);
+
+    // Invalidate token after use (one-time use)
+    serverState.pairingToken = null;
+    saveServerState(serverState);
+    console.log('> Pairing token invalidated (one-time use)');
 
     return json(res, { serverPublicKey: serverState.publicKey, deviceId: newDevice.id });
   }
@@ -494,7 +618,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
 }
 
 async function main() {
-  pinHash = await hashPin(PIN);
+  pinHash = await hashPin(PIN!);
   initializeServer();
   recoverPartialResponses();
 
@@ -570,7 +694,7 @@ async function main() {
         return;
       }
 
-      let msg: { type: string; pin?: string; text?: string };
+      let msg: { type: string; pin?: string; text?: string; projectId?: string };
       try {
         msg = JSON.parse(decrypted);
       } catch (err) {
@@ -653,7 +777,7 @@ async function main() {
         }
 
         const userText = msg.text || '';
-        const projectId = msg.projectId as string | undefined;
+        const projectId = msg.projectId;
         console.log('Processing message:', userText.substring(0, 50), projectId ? `[project: ${projectId}]` : '[global]');
 
         // Validate project if specified
@@ -681,6 +805,13 @@ async function main() {
             timestamp: new Date().toISOString(),
           });
         }
+
+        // Broadcast user message + streaming start to other devices
+        broadcastToOthers(currentDevice.id, {
+          type: 'sync_user_message',
+          projectId,
+          text: userText,
+        });
 
         const jKey = jobKey(currentDevice.id, projectId);
         const abortController = new AbortController();
@@ -723,10 +854,18 @@ async function main() {
         const sessionId = projectId ? getProjectSessionId(projectId) : getClaudeSessionId();
         console.log('Using Claude session:', sessionId || 'new session', projectId ? `[project: ${projectId}]` : '');
 
+        // On first resumed message after server boot, prepend context note
+        const rejoinKey = projectId || '__global__';
+        let messageToSend = userText;
+        if (sessionId && !rejoinNoteSent.has(rejoinKey)) {
+          rejoinNoteSent.add(rejoinKey);
+          messageToSend = `[System: This is the first message from the user since the server rebooted.]\n\n${userText}`;
+        }
+
         const deviceId = currentDevice.id;
         const deviceSecret = currentDevice.sharedSecret;
 
-        spawnClaude(userText, (event: ClaudeEvent) => {
+        spawnClaude(messageToSend, (event: ClaudeEvent) => {
           console.log('[ws] Claude event:', event.type, event.sessionId ? `sessionId=${event.sessionId}` : '', projectId ? `[project: ${projectId}]` : '');
 
           // Don't forward session_init to client, just save it
@@ -749,15 +888,23 @@ async function main() {
           // Include projectId in all events sent to client
           const eventWithProject = projectId ? { ...transformedEvent, projectId } : transformedEvent;
 
-          // Try to send to connected client, or write to disk
-          const clientWs = connectedClients.get(deviceId);
-          if (clientWs && clientWs.readyState === WebSocket.OPEN) {
-            const encrypted = encrypt(JSON.stringify(eventWithProject), deviceSecret);
-            clientWs.send(JSON.stringify(encrypted));
-          } else {
-            // Write to disk for later
+          // Broadcast to ALL connected clients (not just the originating device)
+          const eventJson = JSON.stringify(eventWithProject);
+          let sentToAny = false;
+          for (const [connDeviceId, connWs] of connectedClients.entries()) {
+            if (connWs.readyState === WebSocket.OPEN) {
+              const connDevice = devices.find(d => d.id === connDeviceId);
+              if (connDevice) {
+                const encrypted = encrypt(eventJson, connDevice.sharedSecret);
+                connWs.send(JSON.stringify(encrypted));
+                sentToAny = true;
+              }
+            }
+          }
+          if (!sentToAny) {
+            // No clients connected — write to disk for the originating device
             appendEvent(deviceId, eventWithProject);
-            console.log(`[${deviceId}] Event written to disk (client away)`);
+            console.log(`[${deviceId}] Event written to disk (no clients connected)`);
           }
 
           // Collect response for saving
@@ -816,7 +963,8 @@ async function main() {
                 addMessage(assistantMsg);
               }
             }
-            // Clear partial response file
+            // Clear pending debounced writes and partial response file
+            pendingPartials.delete(jKey);
             clearPartialResponse(jKey);
             // Clear active job
             activeJobs.delete(jKey);
@@ -825,12 +973,17 @@ async function main() {
         }, abortController.signal, sessionId, projectPath);
       } else if (msg.type === 'cancel') {
         console.log('Cancel requested', msg.projectId ? `[project: ${msg.projectId}]` : '[global]');
-        const jKey = jobKey(currentDevice.id, msg.projectId as string | undefined);
+        const jKey = jobKey(currentDevice.id, msg.projectId);
         const abortController = activeJobs.get(jKey);
         if (abortController) {
           abortController.abort();
           activeJobs.delete(jKey);
         }
+        // Notify other devices about the cancel
+        broadcastToOthers(currentDevice.id, {
+          type: 'sync_cancel',
+          projectId: msg.projectId,
+        });
       } else {
         console.log('Unknown message type:', msg.type);
       }
@@ -851,7 +1004,7 @@ async function main() {
     console.log(`> Client URL: ${clientUrl}`);
     console.log(`> Paired devices: ${devices.length}`);
     if (serverState.pairingToken) {
-      const pairUrl = `${clientUrl}/pair/${serverState.pairingToken}`;
+      const pairUrl = `${clientUrl}/pair?server=${encodeURIComponent(serverUrl)}&token=${serverState.pairingToken}`;
       console.log(`> Pair URL: ${pairUrl}`);
       console.log('');
       qrcode.generate(pairUrl, { small: true });
