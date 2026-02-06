@@ -289,7 +289,8 @@ interface ToolStackProps {
 
 export default function ToolStack({ activity, isStreaming }: ToolStackProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const toolPairs = parseActivityPairs(activity);
+  const toolPairs = parseActivityPairs(activity)
+    .filter(pair => pair.use?.tool !== 'AskUserQuestion');
   const [modalIndex, setModalIndex] = useState<number | null>(null);
 
   const closeModal = useCallback(() => setModalIndex(null), []);

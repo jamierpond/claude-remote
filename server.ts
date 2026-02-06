@@ -55,6 +55,20 @@ const connectedClients: Map<string, WebSocket> = new Map();
 // Track which projects have already sent the "rejoined" context note this server boot
 const rejoinNoteSent: Set<string> = new Set();
 
+// Track pending AskUserQuestion prompts waiting for user response
+interface PendingQuestion {
+  toolUseId: string;
+  questions: Array<{
+    question: string;
+    header?: string;
+    options?: Array<{ label: string; description?: string }>;
+    multiSelect?: boolean;
+  }>;
+  projectId?: string;
+  sessionId: string;
+}
+const pendingQuestions: Map<string, PendingQuestion> = new Map();
+
 // Rate limiting for auth attempts per IP
 const AUTH_MAX_ATTEMPTS = 5;
 const AUTH_WINDOW_MS = 60_000; // 1 minute
@@ -774,7 +788,7 @@ async function main() {
         return;
       }
 
-      let msg: { type: string; pin?: string; text?: string; projectId?: string };
+      let msg: { type: string; pin?: string; text?: string; projectId?: string; answers?: Array<{ header: string; answer: string }> };
       try {
         msg = JSON.parse(decrypted);
       } catch (err) {
@@ -1016,10 +1030,25 @@ async function main() {
             assistantActivity.push({
               type: 'tool_use',
               tool: event.toolUse.tool,
+              id: event.toolUse.id,
               input: event.toolUse.input,
               timestamp: Date.now(),
             });
             savePartialResponse(jKey, assistantText, assistantThinking, assistantActivity);
+
+            // Detect AskUserQuestion — store pending question for later answer
+            if (event.toolUse.tool === 'AskUserQuestion' && event.toolUse.id) {
+              const currentSessionId = projectId
+                ? getProjectSessionId(projectId)
+                : getClaudeSessionId();
+              pendingQuestions.set(jKey, {
+                toolUseId: event.toolUse.id,
+                questions: (event.toolUse.input.questions || []) as PendingQuestion['questions'],
+                projectId,
+                sessionId: currentSessionId || '',
+              });
+              console.log(`[${deviceId}] AskUserQuestion detected, stored pending question`);
+            }
           } else if (event.type === 'tool_result' && event.toolResult) {
             assistantActivity.push({
               type: 'tool_result',
@@ -1060,6 +1089,199 @@ async function main() {
             console.log(`[${deviceId}] Job complete for ${projectId || 'global'}, cleared from active jobs`);
           }
         }, abortController.signal, sessionId, projectPath);
+      } else if (msg.type === 'tool_answer') {
+        if (!authenticated) {
+          sendEncrypted({ type: 'error', error: 'Not authenticated' });
+          return;
+        }
+
+        const projectId = msg.projectId;
+        if (projectId && !validateProjectId(projectId)) {
+          sendEncrypted({ type: 'error', error: 'Invalid project ID', projectId });
+          return;
+        }
+
+        const jKey = jobKey(currentDevice.id, projectId);
+        const pending = pendingQuestions.get(jKey);
+
+        if (!pending) {
+          sendEncrypted({ type: 'error', error: 'No pending question found', projectId });
+          return;
+        }
+
+        console.log(`[${currentDevice.id}] Received tool answer for ${projectId || 'global'}`);
+        pendingQuestions.delete(jKey);
+
+        // Format the answer as a user message and resume the session
+        const answerText = msg.answers
+          ? msg.answers.map(a => `${a.header}: ${a.answer}`).join('\n')
+          : msg.text || '';
+
+        const formattedAnswer = `[User answered your question]\n${answerText}`;
+
+        // Save answer as user message
+        if (projectId) {
+          addProjectMessage(projectId, {
+            role: 'user',
+            content: formattedAnswer,
+            timestamp: new Date().toISOString(),
+          });
+        } else {
+          addMessage({
+            role: 'user',
+            content: formattedAnswer,
+            timestamp: new Date().toISOString(),
+          });
+        }
+
+        // Resume session with the answer — reuse the message handling path
+        // by injecting a synthetic message event
+        msg.type = 'message';
+        msg.text = formattedAnswer;
+        // Fall through won't work here, so we need to emit a new message event
+        // Instead, directly spawn Claude with the answer
+        const answerAbortController = new AbortController();
+        activeJobs.set(jKey, answerAbortController);
+
+        let ansAssistantThinking = '';
+        let ansAssistantText = '';
+        const ansAssistantActivity: ToolActivity[] = [];
+        const ansAssistantChunks: OutputChunk[] = [];
+        let ansLastToolName: string | null = null;
+        let ansCurrentChunkText = '';
+        const ansTaskStartedAt = new Date().toISOString();
+
+        const ansIsNewChunkStart = (text: string): boolean => {
+          const trimmed = text.trim();
+          if (ansLastToolName !== null) return true;
+          if (text.startsWith('\n\n')) return true;
+          if (/^(Now|Next|Let me|I'll|First|Finally|Done|After|Moving|Continuing|Great|Perfect|Looking|Based on|The |This |I |Here)/i.test(trimmed)) return true;
+          return false;
+        };
+
+        const ansFlushChunk = (afterTool?: string) => {
+          if (ansCurrentChunkText.trim()) {
+            ansAssistantChunks.push({
+              text: ansCurrentChunkText.trim(),
+              timestamp: Date.now(),
+              afterTool,
+            });
+            ansCurrentChunkText = '';
+          }
+        };
+
+        let ansProjectPath: string | undefined;
+        if (projectId) {
+          const project = getProject(projectId);
+          if (project) ansProjectPath = project.path;
+        }
+
+        const deviceId = currentDevice.id;
+        const deviceSecret = currentDevice.sharedSecret;
+
+        spawnClaude(formattedAnswer, (event: ClaudeEvent) => {
+          console.log('[ws] Claude answer event:', event.type, projectId ? `[project: ${projectId}]` : '');
+
+          if (event.type === 'session_init' && event.sessionId) {
+            if (projectId) {
+              saveProjectSessionId(projectId, event.sessionId);
+            } else {
+              saveClaudeSessionId(event.sessionId);
+            }
+            return;
+          }
+
+          let transformedEvent = event;
+          if (event.type === 'error' && event.text && !('error' in event)) {
+            transformedEvent = { ...event, error: event.text };
+          }
+
+          const eventWithProject = projectId ? { ...transformedEvent, projectId } : transformedEvent;
+
+          const eventJson = JSON.stringify(eventWithProject);
+          let sentToAny = false;
+          for (const [connDeviceId, connWs] of connectedClients.entries()) {
+            if (connWs.readyState === WebSocket.OPEN) {
+              const connDevice = devices.find(d => d.id === connDeviceId);
+              if (connDevice) {
+                const encrypted = encrypt(eventJson, connDevice.sharedSecret);
+                connWs.send(JSON.stringify(encrypted));
+                sentToAny = true;
+              }
+            }
+          }
+          if (!sentToAny) {
+            appendEvent(deviceId, eventWithProject);
+          }
+
+          if (event.type === 'thinking' && event.text) {
+            ansAssistantThinking += event.text;
+            savePartialResponse(jKey, ansAssistantText, ansAssistantThinking, ansAssistantActivity);
+          } else if (event.type === 'text' && event.text) {
+            if (ansIsNewChunkStart(event.text) && ansCurrentChunkText.trim()) {
+              ansFlushChunk(ansLastToolName || undefined);
+              ansLastToolName = null;
+            }
+            ansCurrentChunkText += event.text;
+            ansAssistantText += event.text;
+            savePartialResponse(jKey, ansAssistantText, ansAssistantThinking, ansAssistantActivity);
+          } else if (event.type === 'tool_use' && event.toolUse) {
+            ansFlushChunk();
+            ansLastToolName = event.toolUse.tool;
+            ansAssistantActivity.push({
+              type: 'tool_use',
+              tool: event.toolUse.tool,
+              id: event.toolUse.id,
+              input: event.toolUse.input,
+              timestamp: Date.now(),
+            });
+            savePartialResponse(jKey, ansAssistantText, ansAssistantThinking, ansAssistantActivity);
+
+            if (event.toolUse.tool === 'AskUserQuestion' && event.toolUse.id) {
+              const currentSessionId = projectId
+                ? getProjectSessionId(projectId)
+                : getClaudeSessionId();
+              pendingQuestions.set(jKey, {
+                toolUseId: event.toolUse.id,
+                questions: (event.toolUse.input.questions || []) as PendingQuestion['questions'],
+                projectId,
+                sessionId: currentSessionId || '',
+              });
+            }
+          } else if (event.type === 'tool_result' && event.toolResult) {
+            ansAssistantActivity.push({
+              type: 'tool_result',
+              tool: event.toolResult.tool,
+              output: event.toolResult.output,
+              error: event.toolResult.error,
+              timestamp: Date.now(),
+            });
+            savePartialResponse(jKey, ansAssistantText, ansAssistantThinking, ansAssistantActivity);
+          } else if (event.type === 'done') {
+            ansFlushChunk(ansLastToolName || undefined);
+            if (ansAssistantText || ansAssistantThinking || ansAssistantActivity.length > 0) {
+              const assistantMsg: Message = {
+                role: 'assistant',
+                content: ansAssistantText,
+                task: formattedAnswer,
+                chunks: ansAssistantChunks.length > 0 ? ansAssistantChunks : undefined,
+                thinking: ansAssistantThinking || undefined,
+                activity: ansAssistantActivity.length > 0 ? ansAssistantActivity : undefined,
+                startedAt: ansTaskStartedAt,
+                completedAt: new Date().toISOString(),
+                timestamp: new Date().toISOString(),
+              };
+              if (projectId) {
+                addProjectMessage(projectId, assistantMsg);
+              } else {
+                addMessage(assistantMsg);
+              }
+            }
+            pendingPartials.delete(jKey);
+            clearPartialResponse(jKey);
+            activeJobs.delete(jKey);
+          }
+        }, answerAbortController.signal, pending.sessionId, ansProjectPath);
       } else if (msg.type === 'cancel') {
         if (msg.projectId && !validateProjectId(msg.projectId)) {
           sendEncrypted({ type: 'error', error: 'Invalid project ID' });

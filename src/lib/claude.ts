@@ -2,6 +2,7 @@ import { spawn, ChildProcess } from 'child_process';
 
 export interface ToolUseEvent {
   tool: string;
+  id?: string;
   input: Record<string, unknown>;
 }
 
@@ -123,13 +124,15 @@ export function spawnClaude(
           } else if (block.type === 'tool_use') {
             // Send full tool use event
             const toolName = block.name || 'unknown';
+            const toolUseId = block.id || '';
             const input = block.input || {};
 
-            console.log('[claude] Tool use:', toolName);
+            console.log('[claude] Tool use:', toolName, 'id:', toolUseId);
             onEvent({
               type: 'tool_use',
               toolUse: {
                 tool: toolName,
+                id: toolUseId,
                 input: input as Record<string, unknown>
               }
             });

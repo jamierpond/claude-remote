@@ -4,6 +4,7 @@ import ProjectPicker from '../components/ProjectPicker';
 import StreamingResponse, { type ToolActivity } from '../components/StreamingResponse';
 import ChatInput from '../components/ChatInput';
 import GitStatus from '../components/GitStatus';
+import AskUserQuestionCard from '../components/AskUserQuestionCard';
 import { apiFetch } from '../lib/api';
 
 
@@ -115,6 +116,16 @@ async function decrypt(data: EncryptedData, key: CryptoKey): Promise<string> {
 type View = 'pairing' | 'pin' | 'chat';
 
 // Per-project state container
+interface PendingQuestionData {
+  toolUseId: string;
+  questions: Array<{
+    question: string;
+    header?: string;
+    options?: Array<{ label: string; description?: string }>;
+    multiSelect?: boolean;
+  }>;
+}
+
 interface ProjectState {
   messages: Message[];
   isStreaming: boolean;
@@ -123,6 +134,7 @@ interface ProjectState {
   currentActivity: ToolActivity[];
   currentTask: string;         // The user prompt for current streaming task
   taskStartTime: number | null; // When the current task started
+  pendingQuestion: PendingQuestionData | null;
 }
 
 function createEmptyProjectState(): ProjectState {
@@ -134,6 +146,7 @@ function createEmptyProjectState(): ProjectState {
     currentActivity: [],
     currentTask: '',
     taskStartTime: null,
+    pendingQuestion: null,
   };
 }
 
@@ -715,15 +728,29 @@ export default function Chat({ token = null }: Props) {
           const activity: ToolActivity = {
             type: 'tool_use',
             tool: msg.toolUse.tool,
+            id: msg.toolUse.id,
             input: msg.toolUse.input,
             timestamp: Date.now()
           };
           const currentActivity = activityRefs.current.get(projectId) || [];
           activityRefs.current.set(projectId, [...currentActivity, activity]);
-          updateProjectState(projectId, state => ({
-            ...state,
-            currentActivity: activityRefs.current.get(projectId) || []
-          }));
+
+          // Detect AskUserQuestion — store pending question for interactive UI
+          if (msg.toolUse.tool === 'AskUserQuestion' && msg.toolUse.input?.questions) {
+            updateProjectState(projectId, state => ({
+              ...state,
+              currentActivity: activityRefs.current.get(projectId) || [],
+              pendingQuestion: {
+                toolUseId: msg.toolUse!.id || '',
+                questions: msg.toolUse!.input.questions as PendingQuestionData['questions'],
+              },
+            }));
+          } else {
+            updateProjectState(projectId, state => ({
+              ...state,
+              currentActivity: activityRefs.current.get(projectId) || []
+            }));
+          }
         } else if (msg.type === 'tool_result' && msg.toolResult && projectId) {
           const activity: ToolActivity = {
             type: 'tool_result',
@@ -1026,6 +1053,43 @@ export default function Chat({ token = null }: Props) {
       .catch(err => console.error('[cancel] HTTP cancel failed:', err));
   }, [activeProjectId, updateProjectState]);
 
+  const handleToolAnswer = useCallback(async (answers: Array<{ header: string; answer: string }>) => {
+    if (!activeProjectId || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !sharedKeyRef.current) {
+      setError('Cannot send answer - not connected');
+      return;
+    }
+
+    updateProjectState(activeProjectId, state => ({
+      ...state,
+      pendingQuestion: null,
+      isStreaming: true,
+      currentThinking: '',
+      currentResponse: '',
+      currentActivity: [],
+    }));
+
+    setStreamingProjectIds(prev => new Set(prev).add(activeProjectId));
+    thinkingRefs.current.set(activeProjectId, '');
+    responseRefs.current.set(activeProjectId, '');
+    activityRefs.current.set(activeProjectId, []);
+
+    try {
+      const encrypted = await encrypt(
+        JSON.stringify({ type: 'tool_answer', answers, projectId: activeProjectId }),
+        sharedKeyRef.current
+      );
+      wsRef.current.send(JSON.stringify(encrypted));
+    } catch (err) {
+      setError(`Failed to send answer: ${err}`);
+      updateProjectState(activeProjectId, state => ({ ...state, isStreaming: false }));
+    }
+  }, [activeProjectId, updateProjectState]);
+
+  const handleDismissQuestion = useCallback(() => {
+    if (!activeProjectId) return;
+    updateProjectState(activeProjectId, state => ({ ...state, pendingQuestion: null }));
+  }, [activeProjectId, updateProjectState]);
+
   // Handle project selection from picker
   const handleSelectProject = (project: Project) => {
     console.log('Selected project:', project.id);
@@ -1305,6 +1369,13 @@ export default function Chat({ token = null }: Props) {
               </svg>
             </button>
           </div>
+        )}
+        {activeState.pendingQuestion && !isStreaming && (
+          <AskUserQuestionCard
+            questions={activeState.pendingQuestion.questions}
+            onAnswer={handleToolAnswer}
+            onDismiss={handleDismissQuestion}
+          />
         )}
         <ChatInput
           isStreaming={isStreaming}

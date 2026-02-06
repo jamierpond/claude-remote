@@ -1,108 +1,101 @@
-# Claude Remote Implementation Plan
+# Claude Remote
 
-## Development Principles
+## CRITICAL: YOU ARE BEING OPERATED FROM A PHONE
 
-### Error Handling: SEEK ERRORS, DON'T HIDE THEM
-- **Always show errors to the user** - silent failures waste hours of debugging
-- When implementing any flow (pairing, auth, network calls, crypto):
-  1. Wrap each step in try-catch
-  2. Log with `debugPrint('[CONTEXT] Step N: description...')`
-  3. On failure, throw with context: `throw Exception('Step N failed: $e')`
-  4. Surface errors in the UI immediately - red box, full error text, selectable
-- **Never assume success** - if something can fail, show what happened
-- **Verbose by default** - it's easier to remove logs than to add them when debugging
+The user is controlling you remotely from their phone via this app. They cannot restart the server manually. They cannot SSH in. They cannot fix things if you break them.
 
-### URL Mapping (Production)
-- `ai.pond.audio` = web client (served static files)
-- `ai-server.pond.audio` = API server (WebSocket, REST)
-- Flutter client must map client URLs to server URLs for API calls
+**If you fail to restart the server after making changes, the user loses all access to you.** This is not a minor inconvenience — it is a total loss of control. You will be unreachable until someone physically accesses the machine.
 
-### After Code Changes: ALWAYS VERIFY
-- After making Flutter/Dart changes, run `flutter analyze` to check for errors
-- Run `flutter build web` to verify it compiles
-- Use `make reload` to hot-reload connected clients
-- Don't assume changes work - verify they build before moving on
+### Deployment Rules (NON-NEGOTIABLE)
+- **ALWAYS use `make deploy`** to build + restart. This builds the client, restarts the systemd service, and verifies it came back up.
+- **NEVER kill server processes directly** — you are running inside the server as a subprocess. Killing the server kills you.
+- **NEVER skip the build step** — if the client doesn't build, the frontend will be broken and the user will see a blank page from their phone.
+- **ALWAYS verify the build succeeds before restarting** — if `pnpm build` fails, DO NOT restart the server. Fix the build error first.
+- If a port is stuck after a crash, use `make free-ports`.
+- `make restart` for daemon-only restart (no rebuild).
 
-### UI: NO PLACEHOLDER/INOP ELEMENTS
-- Never add UI elements (buttons, icons, etc.) that don't work yet
-- No "TODO: implement" buttons - either implement it fully or don't add it
-- Confusing inop UI is worse than no UI
+### After ANY Code Change
+1. Run `pnpm build` — if it fails, STOP and fix the error
+2. Run `make deploy` — if it fails, STOP and investigate
+3. The user will reconnect automatically once the server is back up
 
 ## Overview
-Mobile chat interface for local Claude CLI with E2E encryption. Personal use - access Claude from phone via Cloudflare tunnel.
+Mobile chat interface for local Claude CLI with E2E encryption. Personal use — access Claude from phone via Cloudflare tunnel.
 
 ## Architecture
 
 ### Tech Stack
-- **Next.js 16** with App Router
-- **Custom server** for WebSocket support
-- **Tailwind CSS** for styling
+- **Vite + React** client app
+- **Custom Node server** (`server.ts`) with WebSocket support
+- **Tailwind CSS** for styling (CSS variables in `client/src/index.css`)
 - **argon2** for PIN hashing
-- **qrcode** for QR generation
 - **ws** for WebSocket server
+
+### URL Mapping (Production)
+- `ai.pond.audio` = web client (served static files)
+- `ai-server.pond.audio` = API server (WebSocket, REST)
 
 ### Directory Structure
 ```
-claude-remote/
-├── server.ts              # Custom server with WebSocket
-├── src/
-│   ├── lib/
-│   │   ├── crypto.ts      # ECDH + AES-GCM encryption
-│   │   ├── store.ts       # Config/device persistence
-│   │   └── claude.ts      # Claude CLI spawning
-│   └── app/
-│       ├── page.tsx       # QR code / paired status
-│       ├── pair/[token]/
-│       │   └── route.ts   # Pairing API endpoints
-│       └── chat/
-│           └── page.tsx   # Chat interface
+├── server.ts              # HTTP + WebSocket server, port 6767
+├── src/lib/
+│   ├── crypto.ts          # ECDH P-256 + AES-256-GCM
+│   ├── store.ts           # Config/device/conversation persistence
+│   └── claude.ts          # Claude CLI spawning + stream parsing
+├── client/src/
+│   ├── pages/Chat.tsx     # Main chat interface
+│   ├── pages/Home.tsx     # Pairing / status page
+│   ├── components/        # UI components
+│   └── lib/api.ts         # Authenticated fetch wrapper
+├── Makefile               # deploy, restart, free-ports, docker-*
+└── claude-remote.service  # systemd unit file
 ```
 
-## Files to Create
+### Security Model
+- E2E encryption: ECDH key exchange, AES-256-GCM per message
+- PIN auth: argon2-hashed, rate limited (5 attempts/min/IP)
+- All `/api/` routes require Bearer PIN (except limited `/api/status`)
+- CORS restricted to known origins
+- Path traversal protection on static files and projectId
+- Timing-safe device lookup and PIN comparison
 
-### 1. `src/lib/crypto.ts`
-- `generateKeyPair()` - ECDH P-256
-- `deriveSharedSecret(privateKey, peerPublicKey)` - ECDH derive
-- `encrypt(plaintext, secret)` - AES-256-GCM, returns {iv, ct, tag}
-- `decrypt(encrypted, secret)` - AES-256-GCM
+## Development Principles
+
+### Error Handling: SEEK ERRORS, DON'T HIDE THEM
+- **Always show errors to the user** — silent failures waste hours of debugging
+- When implementing any flow (pairing, auth, network calls, crypto):
+  1. Wrap each step in try-catch
+  2. Log with context
+  3. On failure, throw with context
+  4. Surface errors in the UI immediately — red box, full error text, selectable
+- **Never assume success** — if something can fail, show what happened
+- **Verbose by default** — it's easier to remove logs than to add them when debugging
+
+### UI: NO PLACEHOLDER/INOP ELEMENTS
+- Never add UI elements (buttons, icons, etc.) that don't work yet
+- No "TODO: implement" buttons — either implement it fully or don't add it
+- Confusing inop UI is worse than no UI
+
+## Key Libraries
+
+### `src/lib/crypto.ts`
+- `generateKeyPair()` — ECDH P-256
+- `deriveSharedSecret(privateKey, peerPublicKey)` — ECDH derive
+- `encrypt(plaintext, secret)` — AES-256-GCM, returns {iv, ct, tag}
+- `decrypt(encrypted, secret)` — AES-256-GCM
 - Key serialization helpers (base64 <-> Buffer)
 
-### 2. `src/lib/store.ts`
+### `src/lib/store.ts`
 - Config dir: `~/.config/claude-remote/`
-- `loadDevice()` / `saveDevice()` - device.json
-- `loadConfig()` / `saveConfig()` - config.json (PIN hash)
-- `hashPin(pin)` / `verifyPin(pin, hash)` - argon2
+- `loadDevice()` / `saveDevice()` — device.json
+- `loadConfig()` / `saveConfig()` — config.json (PIN hash)
+- `hashPin(pin)` / `verifyPin(pin, hash)` — argon2
 
-### 3. `src/lib/claude.ts`
-- `spawnClaude(message, onEvent, signal)` - spawn CLI with streaming
+### `src/lib/claude.ts`
+- `spawnClaude(message, onEvent, signal)` — spawn CLI with streaming
 - Parse JSON stream events: content_block_start, content_block_delta
 - Map to simplified events: {type: 'thinking'|'text', text, done}
 - Handle cancel via AbortSignal
-
-### 4. `server.ts`
-- Custom Next.js server on port 3001
-- WebSocket server on `/ws`:
-  - Verify device is paired
-  - Handle encrypted messages: auth, message, cancel
-  - Stream encrypted responses back
-- Session management: authenticated state per connection
-
-### 5. `src/app/page.tsx`
-- Server component showing QR code when no device paired
-- Shows "Paired" status when device exists
-- QR contains URL: `{baseUrl}/pair/{token}`
-
-### 6. `src/app/pair/[token]/route.ts`
-- `GET` - Return server public key
-- `POST` - Receive client public key, complete pairing
-
-### 7. `src/app/chat/page.tsx`
-Client-side chat interface:
-- **Crypto**: Web Crypto API for ECDH + AES-GCM
-- **Views**: PIN entry → Chat
-- **Chat UI**: Thinking bubbles, response bubbles, input
-- **WebSocket**: Connect, encrypt/decrypt messages
-- **Storage**: localStorage for deviceId, privateKey, sharedSecret
 
 ## Pairing Flow
 
@@ -140,8 +133,8 @@ The `logs/` directory is gitignored.
 
 ## Verification
 
-1. `npm run dev` - starts server on port 3001
-2. Open localhost:3001 - see QR code
+1. `make deploy` — builds and starts server on port 6767
+2. Open ai.pond.audio — see pairing page
 3. Scan QR with phone, complete pairing
 4. Set PIN, verify PIN entry works
 5. Send message, verify streaming response
