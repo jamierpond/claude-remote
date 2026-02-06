@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { Project } from './ProjectTabs';
+import { apiFetch } from '../lib/api';
 
 interface ProjectPickerProps {
   isOpen: boolean;
@@ -29,7 +30,7 @@ export default function ProjectPicker({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/projects');
+      const res = await apiFetch('/api/projects');
       if (!res.ok) throw new Error('Failed to fetch projects');
       const data = await res.json();
       setProjects(data.projects || []);

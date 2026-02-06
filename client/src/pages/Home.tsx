@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import type { PairInfo } from '../App';
+import { apiFetch } from '../lib/api';
 
 interface Props {
   onNavigate: (route: 'home' | 'chat' | 'pair') => void;
@@ -95,7 +96,7 @@ export default function Home({ onNavigate, pairInfo }: Props) {
   const handleUnpair = async () => {
     setUnpairing(true);
     try {
-      const res = await fetch('/api/unpair', { method: 'POST' });
+      const res = await apiFetch('/api/unpair', { method: 'POST' });
       if (res.ok) {
         localStorage.removeItem('claude-remote-paired');
         localStorage.removeItem('claude-remote-device-id');
