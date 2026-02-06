@@ -4,12 +4,12 @@ config({ path: '.env.local' });
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { parse } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
-import { randomBytes } from 'crypto';
+import { randomBytes, timingSafeEqual } from 'crypto';
 import { readFileSync, existsSync, appendFileSync, writeFileSync } from 'fs';
 import { execSync } from 'child_process';
 import { homedir } from 'os';
 import qrcode from 'qrcode-terminal';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import {
   generateKeyPair,
   deriveSharedSecret,
@@ -36,6 +36,7 @@ import {
   ToolActivity,
   OutputChunk,
   // Project support
+  validateProjectId,
   listProjects,
   getProject,
   loadProjectConversation,
@@ -53,6 +54,22 @@ const activeJobs: Map<string, AbortController> = new Map();
 const connectedClients: Map<string, WebSocket> = new Map();
 // Track which projects have already sent the "rejoined" context note this server boot
 const rejoinNoteSent: Set<string> = new Set();
+
+// Rate limiting for auth attempts per IP
+const AUTH_MAX_ATTEMPTS = 5;
+const AUTH_WINDOW_MS = 60_000; // 1 minute
+const authAttempts: Map<string, { count: number; resetAt: number }> = new Map();
+
+function checkAuthRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = authAttempts.get(ip);
+  if (!entry || now >= entry.resetAt) {
+    authAttempts.set(ip, { count: 1, resetAt: now + AUTH_WINDOW_MS });
+    return true;
+  }
+  entry.count++;
+  return entry.count <= AUTH_MAX_ATTEMPTS;
+}
 
 // Broadcast reload message to all connected clients (for dev hot reload)
 function broadcastReload() {
@@ -253,16 +270,18 @@ function reloadState() {
   }
 }
 
+// Try all devices to avoid timing side-channel leaking which device index matched
 function findDeviceByDecryption(encrypted: EncryptedData): Device | null {
+  let matched: Device | null = null;
   for (const device of devices) {
     try {
       decrypt(encrypted, device.sharedSecret);
-      return device;
+      matched = device;
     } catch {
       // Try next device
     }
   }
-  return null;
+  return matched;
 }
 
 function json(res: ServerResponse, data: object, status = 200) {
@@ -270,14 +289,37 @@ function json(res: ServerResponse, data: object, status = 200) {
   res.end(JSON.stringify(data));
 }
 
+// API authentication: compare PIN using timing-safe comparison
+function checkApiAuth(req: IncomingMessage, res: ServerResponse): boolean {
+  const auth = req.headers['authorization'];
+  if (!auth || !auth.startsWith('Bearer ')) {
+    json(res, { error: 'Unauthorized' }, 401);
+    return false;
+  }
+  const providedPin = auth.slice(7);
+  // Use timingSafeEqual to prevent timing attacks
+  const pinBuf = Buffer.from(PIN!);
+  const providedBuf = Buffer.from(providedPin);
+  if (pinBuf.length !== providedBuf.length || !timingSafeEqual(pinBuf, providedBuf)) {
+    json(res, { error: 'Unauthorized' }, 401);
+    return false;
+  }
+  return true;
+}
+
 async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   const { pathname } = parse(req.url || '', true);
   const method = req.method || 'GET';
 
-  // CORS for dev
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  // CORS: restrict to known origins
+  const allowedOrigins = [clientUrl, 'https://ai.pond.audio'];
+  const origin = req.headers['origin'];
+  if (origin && allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (method === 'OPTIONS') {
     res.writeHead(204);
@@ -285,14 +327,37 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     return;
   }
 
-  // API: Status - includes pairing URL (always available for multi-device)
+  // Auth gate: all /api/ routes require PIN auth, except /api/status (limited info without auth)
+  if (pathname?.startsWith('/api/') && pathname !== '/api/status') {
+    if (!checkApiAuth(req, res)) return;
+  }
+
+  // API: Status - limited info without auth, full info with auth
   if (pathname === '/api/status' && method === 'GET') {
     reloadState();
+    // Check if caller is authenticated (optional)
+    const auth = req.headers['authorization'];
+    const isAuthed = (() => {
+      if (!auth || !auth.startsWith('Bearer ')) return false;
+      const providedPin = auth.slice(7);
+      const pinBuf = Buffer.from(PIN!);
+      const providedBuf = Buffer.from(providedPin);
+      return pinBuf.length === providedBuf.length && timingSafeEqual(pinBuf, providedBuf);
+    })();
+
+    if (isAuthed) {
+      return json(res, {
+        paired: devices.length > 0,
+        devices: devices.map(d => ({ id: d.id, createdAt: d.createdAt })),
+        deviceCount: devices.length,
+        pairingUrl: serverState.pairingToken ? `${clientUrl}/pair?server=${encodeURIComponent(serverUrl)}&token=${serverState.pairingToken}` : null,
+      });
+    }
+
+    // Unauthenticated: limited info only
     return json(res, {
       paired: devices.length > 0,
-      devices: devices.map(d => ({ id: d.id, createdAt: d.createdAt })),
       deviceCount: devices.length,
-      pairingUrl: serverState.pairingToken ? `${clientUrl}/pair?server=${encodeURIComponent(serverUrl)}&token=${serverState.pairingToken}` : null,
     });
   }
 
@@ -362,7 +427,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
 
   // API: Get project conversation history
   if (pathname?.startsWith('/api/projects/') && pathname.endsWith('/conversation') && method === 'GET') {
-    const projectId = pathname.split('/api/projects/')[1].replace('/conversation', '');
+    const projectId = decodeURIComponent(pathname.split('/api/projects/')[1].replace('/conversation', ''));
+    if (!validateProjectId(projectId)) return json(res, { error: 'Invalid project ID' }, 400);
     const project = getProject(projectId);
     if (!project) {
       return json(res, { error: 'Project not found' }, 404);
@@ -374,7 +440,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
 
   // API: Clear project conversation
   if (pathname?.startsWith('/api/projects/') && pathname.endsWith('/conversation') && method === 'DELETE') {
-    const projectId = pathname.split('/api/projects/')[1].replace('/conversation', '');
+    const projectId = decodeURIComponent(pathname.split('/api/projects/')[1].replace('/conversation', ''));
+    if (!validateProjectId(projectId)) return json(res, { error: 'Invalid project ID' }, 400);
     const project = getProject(projectId);
     if (!project) {
       return json(res, { error: 'Project not found' }, 404);
@@ -387,6 +454,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   // API: Get streaming state for a project (used on reconnect to restore UI state)
   if (pathname?.startsWith('/api/projects/') && pathname.endsWith('/streaming') && method === 'GET') {
     const projectId = decodeURIComponent(pathname.split('/api/projects/')[1].replace('/streaming', ''));
+    if (!validateProjectId(projectId)) return json(res, { error: 'Invalid project ID' }, 400);
 
     // Check if there's an active job for any device on this project
     let isStreaming = false;
@@ -420,6 +488,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   // API: Cancel task for a project (HTTP fallback for unreliable WebSocket)
   if (pathname?.startsWith('/api/projects/') && pathname.endsWith('/cancel') && method === 'POST') {
     const projectId = decodeURIComponent(pathname.split('/api/projects/')[1].replace('/cancel', ''));
+    if (!validateProjectId(projectId)) return json(res, { error: 'Invalid project ID' }, 400);
     console.log(`[api] HTTP cancel requested for project: ${projectId}`);
 
     // Find and abort all active jobs for this project (any device)
@@ -439,6 +508,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   // API: Get git status for a project
   if (pathname?.startsWith('/api/projects/') && pathname.endsWith('/git') && method === 'GET') {
     const projectId = decodeURIComponent(pathname.split('/api/projects/')[1].replace('/git', ''));
+    if (!validateProjectId(projectId)) return json(res, { error: 'Invalid project ID' }, 400);
     const project = getProject(projectId);
     if (!project) {
       return json(res, { error: 'Project not found' }, 404);
@@ -588,7 +658,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   // Static files (production)
   const distPath = join(process.cwd(), 'dist', 'client');
   if (existsSync(distPath)) {
-    let filePath = join(distPath, pathname === '/' ? 'index.html' : pathname || '');
+    const requestedPath = pathname === '/' ? 'index.html' : (pathname || '').replace(/^\//, '');
+    let filePath = resolve(distPath, requestedPath);
+
+    // Path traversal protection: resolved path must be within distPath
+    if (!filePath.startsWith(distPath + '/') && filePath !== distPath) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('Forbidden');
+      return;
+    }
 
     // SPA fallback
     if (!existsSync(filePath) || !filePath.includes('.')) {
@@ -637,9 +715,11 @@ async function main() {
     }
   });
 
-  wss.on('connection', (ws: WebSocket) => {
+  wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
     let authenticated = false;
     let currentDevice: Device | null = null;
+    const clientIp = req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim()
+      || req.socket.remoteAddress || 'unknown';
 
     const sendEncrypted = (data: object) => {
       if (!currentDevice) return;
@@ -706,6 +786,11 @@ async function main() {
       console.log(`[${currentDevice.id}] Received message type:`, msg.type);
 
       if (msg.type === 'auth') {
+        if (!checkAuthRateLimit(clientIp)) {
+          console.log(`Auth rate limited for IP: ${clientIp}`);
+          sendEncrypted({ type: 'auth_error', error: 'Too many attempts. Try again later.' });
+          return;
+        }
         const valid = await verifyPin(msg.pin || '', pinHash);
         if (valid) {
           authenticated = true;
@@ -780,9 +865,13 @@ async function main() {
         const projectId = msg.projectId;
         console.log('Processing message:', userText.substring(0, 50), projectId ? `[project: ${projectId}]` : '[global]');
 
-        // Validate project if specified
+        // Validate projectId format and existence
         let projectPath: string | undefined;
         if (projectId) {
+          if (!validateProjectId(projectId)) {
+            sendEncrypted({ type: 'error', error: `Invalid project ID: ${projectId}`, projectId });
+            return;
+          }
           const project = getProject(projectId);
           if (!project) {
             sendEncrypted({ type: 'error', error: `Project not found: ${projectId}`, projectId });
@@ -972,6 +1061,10 @@ async function main() {
           }
         }, abortController.signal, sessionId, projectPath);
       } else if (msg.type === 'cancel') {
+        if (msg.projectId && !validateProjectId(msg.projectId)) {
+          sendEncrypted({ type: 'error', error: 'Invalid project ID' });
+          return;
+        }
         console.log('Cancel requested', msg.projectId ? `[project: ${msg.projectId}]` : '[global]');
         const jKey = jobKey(currentDevice.id, msg.projectId);
         const abortController = activeJobs.get(jKey);
