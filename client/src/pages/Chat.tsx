@@ -4,6 +4,7 @@ import ProjectPicker from '../components/ProjectPicker';
 import StreamingResponse, { type ToolActivity } from '../components/StreamingResponse';
 import ChatInput from '../components/ChatInput';
 import GitStatus from '../components/GitStatus';
+import { apiFetch } from '../lib/api';
 
 
 interface Props {
@@ -223,7 +224,7 @@ export default function Chat({ token = null }: Props) {
     console.log(`Fetching conversation history for project: ${projectId}`);
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
-        const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/conversation`);
+        const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/conversation`);
         if (!res.ok) {
           throw new Error(`Failed to fetch history: ${res.status}`);
         }
@@ -273,7 +274,7 @@ export default function Chat({ token = null }: Props) {
   const fetchProjectStreamingState = useCallback(async (projectId: string) => {
     console.log(`Fetching streaming state for project: ${projectId}`);
     try {
-      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/streaming`);
+      const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/streaming`);
       if (!res.ok) {
         throw new Error(`Failed to fetch streaming state: ${res.status}`);
       }
@@ -316,7 +317,7 @@ export default function Chat({ token = null }: Props) {
   const clearHistory = async () => {
     if (!activeProjectId) return;
     try {
-      const res = await fetch(`/api/projects/${encodeURIComponent(activeProjectId)}/conversation`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/projects/${encodeURIComponent(activeProjectId)}/conversation`, { method: 'DELETE' });
       if (!res.ok) throw new Error(`Failed to clear history: ${res.status}`);
       updateProjectState(activeProjectId, state => ({ ...state, messages: [] }));
     } catch (err) {
@@ -1021,7 +1022,7 @@ export default function Chat({ token = null }: Props) {
     }
 
     // Also fire HTTP cancel as fallback (fire and forget)
-    fetch(`/api/projects/${encodeURIComponent(activeProjectId)}/cancel`, { method: 'POST' })
+    apiFetch(`/api/projects/${encodeURIComponent(activeProjectId)}/cancel`, { method: 'POST' })
       .catch(err => console.error('[cancel] HTTP cancel failed:', err));
   }, [activeProjectId, updateProjectState]);
 

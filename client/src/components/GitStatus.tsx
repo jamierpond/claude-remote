@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { apiFetch } from '../lib/api';
 
 interface GitFile {
   status: string;
@@ -53,7 +54,7 @@ export default function GitStatus({ projectId }: GitStatusProps) {
     console.log('[GitStatus] Fetching git status for:', projectId);
     setLoading(true);
     try {
-      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/git`);
+      const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/git`);
       if (!res.ok) {
         const data = await res.json();
         console.error('[GitStatus] API error:', data);
