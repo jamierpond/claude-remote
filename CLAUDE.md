@@ -1,5 +1,33 @@
 # Claude Remote Implementation Plan
 
+## Development Principles
+
+### Error Handling: SEEK ERRORS, DON'T HIDE THEM
+- **Always show errors to the user** - silent failures waste hours of debugging
+- When implementing any flow (pairing, auth, network calls, crypto):
+  1. Wrap each step in try-catch
+  2. Log with `debugPrint('[CONTEXT] Step N: description...')`
+  3. On failure, throw with context: `throw Exception('Step N failed: $e')`
+  4. Surface errors in the UI immediately - red box, full error text, selectable
+- **Never assume success** - if something can fail, show what happened
+- **Verbose by default** - it's easier to remove logs than to add them when debugging
+
+### URL Mapping (Production)
+- `ai.pond.audio` = web client (served static files)
+- `ai-server.pond.audio` = API server (WebSocket, REST)
+- Flutter client must map client URLs to server URLs for API calls
+
+### After Code Changes: ALWAYS VERIFY
+- After making Flutter/Dart changes, run `flutter analyze` to check for errors
+- Run `flutter build web` to verify it compiles
+- Use `make reload` to hot-reload connected clients
+- Don't assume changes work - verify they build before moving on
+
+### UI: NO PLACEHOLDER/INOP ELEMENTS
+- Never add UI elements (buttons, icons, etc.) that don't work yet
+- No "TODO: implement" buttons - either implement it fully or don't add it
+- Confusing inop UI is worse than no UI
+
 ## Overview
 Mobile chat interface for local Claude CLI with E2E encryption. Personal use - access Claude from phone via Cloudflare tunnel.
 

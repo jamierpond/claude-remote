@@ -39,11 +39,11 @@ export default function ProjectTabs({
   }, [activeProjectId]);
 
   return (
-    <div className="flex items-center border-b border-gray-700 bg-gray-800/50">
+    <div className="flex items-center border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)]">
       {/* Add project button */}
       <button
         onClick={onAddProject}
-        className="flex-shrink-0 p-2 px-3 text-gray-400 hover:text-white hover:bg-gray-700/50 transition-colors border-r border-gray-700"
+        className="flex-shrink-0 p-2 px-3 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors border-r border-[var(--color-border-default)]"
         title="Open project"
         aria-label="Open project"
       >
@@ -70,16 +70,16 @@ export default function ProjectTabs({
                 onClick={() => onSelectProject(project.id)}
                 className={`
                   group flex items-center gap-2 px-3 py-2 text-sm font-medium whitespace-nowrap
-                  border-r border-gray-700 transition-colors min-w-0
+                  border-r border-[var(--color-border-default)] transition-colors min-w-0
                   ${isActive
-                    ? 'bg-gray-900 text-white border-b-2 border-b-blue-500'
-                    : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
+                    ? 'bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] border-b-2 border-b-[var(--color-accent)]'
+                    : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]'
                   }
                 `}
               >
                 {/* Streaming indicator */}
                 {isStreaming && (
-                  <span className="w-2 h-2 bg-blue-400 rounded-full animate-pulse flex-shrink-0" />
+                  <span className="w-2 h-2 bg-[var(--color-accent)] rounded-full animate-pulse flex-shrink-0" />
                 )}
 
                 {/* Project name */}
@@ -92,8 +92,8 @@ export default function ProjectTabs({
                     onCloseProject(project.id);
                   }}
                   className={`
-                    flex-shrink-0 p-0.5 rounded hover:bg-gray-600 transition-colors
-                    ${isActive ? 'text-gray-400 hover:text-white' : 'text-gray-500 hover:text-gray-300 opacity-0 group-hover:opacity-100'}
+                    flex-shrink-0 p-0.5 rounded hover:bg-[var(--color-border-emphasis)] transition-colors
+                    ${isActive ? 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]' : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] opacity-0 group-hover:opacity-100'}
                   `}
                   title="Close project"
                   aria-label={`Close ${project.name}`}
