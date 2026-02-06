@@ -51,6 +51,8 @@ import { spawnClaude, ClaudeEvent } from './src/lib/claude';
 const activeJobs: Map<string, AbortController> = new Map();
 // Track connected WebSockets per device
 const connectedClients: Map<string, WebSocket> = new Map();
+// Track which projects have already sent the "rejoined" context note this server boot
+const rejoinNoteSent: Set<string> = new Set();
 
 // Helper to create job key
 function jobKey(deviceId: string, projectId?: string): string {
@@ -723,10 +725,18 @@ async function main() {
         const sessionId = projectId ? getProjectSessionId(projectId) : getClaudeSessionId();
         console.log('Using Claude session:', sessionId || 'new session', projectId ? `[project: ${projectId}]` : '');
 
+        // On first resumed message after server boot, prepend context note
+        const rejoinKey = projectId || '__global__';
+        let messageToSend = userText;
+        if (sessionId && !rejoinNoteSent.has(rejoinKey)) {
+          rejoinNoteSent.add(rejoinKey);
+          messageToSend = `[System: This is the first message from the user since the server rebooted.]\n\n${userText}`;
+        }
+
         const deviceId = currentDevice.id;
         const deviceSecret = currentDevice.sharedSecret;
 
-        spawnClaude(userText, (event: ClaudeEvent) => {
+        spawnClaude(messageToSend, (event: ClaudeEvent) => {
           console.log('[ws] Claude event:', event.type, event.sessionId ? `sessionId=${event.sessionId}` : '', projectId ? `[project: ${projectId}]` : '');
 
           // Don't forward session_init to client, just save it
