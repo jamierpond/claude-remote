@@ -1,1 +1,53 @@
 @import "tailwindcss";
+
+@theme {
+  --font-sans: 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+
+  /* Anthropic warm dark palette */
+  --color-bg-primary: #1a1a1a;
+  --color-bg-secondary: #222222;
+  --color-bg-tertiary: #2a2a2a;
+  --color-bg-elevated: #2e2e2e;
+  --color-bg-hover: #333333;
+
+  --color-border-default: #333333;
+  --color-border-subtle: #2a2a2a;
+  --color-border-emphasis: #444444;
+
+  --color-text-primary: #e8e4e0;
+  --color-text-secondary: #a09890;
+  --color-text-tertiary: #706860;
+  --color-text-muted: #585048;
+
+  --color-accent: #c96442;
+  --color-accent-hover: #b85838;
+  --color-accent-muted: #c9644230;
+}
+
+body {
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-feature-settings: 'liga' 1, 'calt' 1;
+  letter-spacing: -0.01em;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #4a4a4a;
+}
+
+::selection {
+  background: var(--color-accent-muted);
+  color: var(--color-text-primary);
+}

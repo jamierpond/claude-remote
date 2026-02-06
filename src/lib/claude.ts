@@ -14,6 +14,7 @@ export interface ToolResultEvent {
 export interface ClaudeEvent {
   type: 'thinking' | 'text' | 'error' | 'done' | 'session_init' | 'tool_use' | 'tool_result';
   text?: string;
+  error?: string;
   sessionId?: string;
   toolUse?: ToolUseEvent;
   toolResult?: ToolResultEvent;

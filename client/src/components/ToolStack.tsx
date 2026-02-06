@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
-import type { ToolActivity } from './StreamingResponse';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
+import type { ToolActivity } from './types';
 
 // Tool category colors and icons
 const toolConfig: Record<string, { icon: string; color: string; bg: string; border: string }> = {
@@ -16,7 +17,7 @@ const toolConfig: Record<string, { icon: string; color: string; bg: string; bord
   AskUserQuestion: { icon: '❓', color: 'text-pink-400', bg: 'bg-pink-950/30', border: 'border-pink-500/50' },
 };
 
-const defaultToolConfig = { icon: '⚙️', color: 'text-gray-400', bg: 'bg-gray-800/50', border: 'border-gray-600/50' };
+const defaultToolConfig = { icon: '⚙️', color: 'text-[var(--color-text-secondary)]', bg: 'bg-[var(--color-bg-secondary)]', border: 'border-[var(--color-border-default)]' };
 
 function getToolConfig(tool: string) {
   return toolConfig[tool] || defaultToolConfig;
@@ -69,15 +70,161 @@ function parseActivityPairs(activity: ToolActivity[]) {
   return pairs;
 }
 
+// Fullscreen detail modal for tool use
+function ToolDetailModal({ tool, input, result, timestamp, onClose }: {
+  tool: string;
+  input: Record<string, unknown>;
+  result?: { output?: string; error?: string };
+  timestamp: number;
+  onClose: () => void;
+}) {
+  const config = getToolConfig(tool);
+
+  // Close on Escape key
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
+  // Prevent body scroll while modal is open
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = ''; };
+  }, []);
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex flex-col bg-black/80 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="flex-1 flex flex-col m-2 sm:m-4 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Modal header */}
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--color-border-default)] bg-[var(--color-bg-tertiary)] shrink-0">
+          <span className="text-lg">{config.icon}</span>
+          <span className={`font-semibold text-sm ${config.color}`}>{tool}</span>
+          {!!input.file_path && (
+            <span className="text-xs text-[var(--color-text-secondary)] font-mono truncate">{String(input.file_path)}</span>
+          )}
+          <div className="flex-1" />
+          {result?.error ? (
+            <span className="text-xs text-red-400 font-medium">Error</span>
+          ) : result ? (
+            <span className="text-xs text-green-400 font-medium">Done</span>
+          ) : (
+            <span className="text-xs text-[var(--color-accent)] font-medium">Running...</span>
+          )}
+          <span className="text-xs text-[var(--color-text-tertiary)] tabular-nums">{formatTimestamp(timestamp)}</span>
+          <button
+            onClick={onClose}
+            className="ml-2 text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] transition-colors text-xl leading-none px-1"
+          >
+            ×
+          </button>
+        </div>
+
+        {/* Modal body - scrollable */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 text-sm">
+          {/* Edit diff view */}
+          {tool === 'Edit' && !!input.old_string && (
+            <div className="space-y-4">
+              <div>
+                <div className="text-red-400 mb-2 flex items-center gap-1 font-medium text-xs">
+                  <span className="font-bold">−</span> Removed
+                </div>
+                <pre className="p-3 bg-red-950/40 border-l-2 border-red-500 rounded-lg text-red-200 whitespace-pre-wrap overflow-x-auto">
+                  {String(input.old_string)}
+                </pre>
+              </div>
+              <div>
+                <div className="text-green-400 mb-2 flex items-center gap-1 font-medium text-xs">
+                  <span className="font-bold">+</span> Added
+                </div>
+                <pre className="p-3 bg-green-950/40 border-l-2 border-green-500 rounded-lg text-green-200 whitespace-pre-wrap overflow-x-auto">
+                  {String(input.new_string || '')}
+                </pre>
+              </div>
+            </div>
+          )}
+
+          {/* Write content */}
+          {tool === 'Write' && Boolean(input.content) && (
+            <div>
+              <div className="text-green-400 mb-2 font-medium text-xs">Content</div>
+              <pre className="p-3 bg-green-950/40 border-l-2 border-green-500 rounded-lg text-green-200 whitespace-pre-wrap overflow-x-auto">
+                {String(input.content)}
+              </pre>
+            </div>
+          )}
+
+          {/* Bash command */}
+          {tool === 'Bash' && Boolean(input.command) && (
+            <div>
+              <div className="text-yellow-400 mb-2 font-medium text-xs">Command</div>
+              <pre className="p-3 bg-[#111] rounded-lg text-yellow-200 font-mono whitespace-pre-wrap overflow-x-auto">
+                <span className="text-yellow-500">$</span> {String(input.command)}
+              </pre>
+            </div>
+          )}
+
+          {/* Read - just show file path */}
+          {tool === 'Read' && Boolean(input.file_path) && !input.content && (
+            <div>
+              <div className="text-cyan-400 mb-2 font-medium text-xs">File</div>
+              <pre className="p-3 bg-[#111] rounded-lg text-cyan-200 font-mono">{String(input.file_path)}</pre>
+            </div>
+          )}
+
+          {/* Generic input for other tools */}
+          {!['Read', 'Write', 'Edit', 'Bash'].includes(tool) && Object.keys(input).length > 0 && (
+            <div>
+              <div className="text-[var(--color-text-secondary)] mb-2 font-medium text-xs">Input</div>
+              <pre className="p-3 bg-[var(--color-bg-secondary)] rounded-lg text-[var(--color-text-secondary)] whitespace-pre-wrap overflow-x-auto">
+                {JSON.stringify(input, null, 2)}
+              </pre>
+            </div>
+          )}
+
+          {/* Result output */}
+          {result?.output && (
+            <div>
+              <div className="text-[var(--color-text-secondary)] mb-2 font-medium text-xs">Output</div>
+              <pre className="p-3 bg-[var(--color-bg-secondary)] rounded-lg text-[var(--color-text-secondary)] whitespace-pre-wrap overflow-x-auto">
+                {result.output}
+              </pre>
+            </div>
+          )}
+
+          {/* Error */}
+          {result?.error && (
+            <div>
+              <div className="text-red-400 mb-2 font-medium text-xs">Error</div>
+              <div className="text-red-400 bg-red-950/30 p-3 rounded-lg whitespace-pre-wrap">
+                {result.error}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 // Compact tool card for the stack
-function StackToolCard({ tool, input, result, timestamp, isLatest }: {
+function StackToolCard({ tool, input, result, timestamp, isLatest, onOpenDetail }: {
   tool: string;
   input: Record<string, unknown>;
   result?: { output?: string; error?: string };
   timestamp: number;
   isLatest?: boolean;
+  onOpenDetail: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const config = getToolConfig(tool);
 
   // Get a summary based on tool type
@@ -104,15 +251,15 @@ function StackToolCard({ tool, input, result, timestamp, isLatest }: {
   const summary = getSummary();
 
   return (
-    <div className={`rounded-lg border ${config.border} ${config.bg} overflow-hidden ${isLatest ? 'ring-1 ring-blue-500/50' : ''}`}>
+    <div className={`rounded-lg border ${config.border} ${config.bg} overflow-hidden ${isLatest ? 'ring-1 ring-[var(--color-accent)]/50' : ''}`}>
       <button
-        onClick={() => setExpanded(!expanded)}
+        onClick={onOpenDetail}
         className="w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-white/5 transition-colors"
       >
         <span className="text-base">{config.icon}</span>
         <span className={`font-medium text-xs ${config.color}`}>{tool}</span>
         {summary && (
-          <span className="text-xs text-gray-400 truncate flex-1 font-mono">{summary}</span>
+          <span className="text-xs text-[var(--color-text-secondary)] truncate flex-1 font-mono">{summary}</span>
         )}
         {!summary && <div className="flex-1" />}
 
@@ -122,80 +269,15 @@ function StackToolCard({ tool, input, result, timestamp, isLatest }: {
         ) : result ? (
           <span className="text-xs text-green-400">ok</span>
         ) : isLatest ? (
-          <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
+          <span className="w-1.5 h-1.5 bg-[var(--color-accent)] rounded-full animate-pulse" />
         ) : null}
 
         {/* Timestamp */}
-        <span className="text-xs text-gray-500 tabular-nums">{formatTimestamp(timestamp)}</span>
+        <span className="text-xs text-[var(--color-text-tertiary)] tabular-nums">{formatTimestamp(timestamp)}</span>
 
-        {/* Expand arrow */}
-        <span className={`text-xs text-gray-500 transform transition-transform ${expanded ? 'rotate-90' : ''}`}>▶</span>
+        {/* Detail arrow */}
+        <span className="text-xs text-[var(--color-text-tertiary)]">▶</span>
       </button>
-
-      {expanded && (
-        <div className="border-t border-gray-700/50 p-3 space-y-2 text-xs">
-          {/* Edit diff view */}
-          {tool === 'Edit' && input.old_string && (
-            <div className="space-y-2">
-              <div>
-                <div className="text-red-400 mb-1 flex items-center gap-1">
-                  <span className="font-bold">−</span> Removed
-                </div>
-                <pre className="p-2 bg-red-950/40 border-l-2 border-red-500 rounded text-red-200 whitespace-pre-wrap overflow-x-auto max-h-24">
-                  {String(input.old_string).substring(0, 300)}
-                  {String(input.old_string).length > 300 && <span className="text-red-400/50">...</span>}
-                </pre>
-              </div>
-              <div>
-                <div className="text-green-400 mb-1 flex items-center gap-1">
-                  <span className="font-bold">+</span> Added
-                </div>
-                <pre className="p-2 bg-green-950/40 border-l-2 border-green-500 rounded text-green-200 whitespace-pre-wrap overflow-x-auto max-h-24">
-                  {String(input.new_string || '').substring(0, 300)}
-                  {String(input.new_string || '').length > 300 && <span className="text-green-400/50">...</span>}
-                </pre>
-              </div>
-            </div>
-          )}
-
-          {/* Write content */}
-          {tool === 'Write' && input.content && (
-            <pre className="p-2 bg-green-950/40 border-l-2 border-green-500 rounded text-green-200 whitespace-pre-wrap overflow-x-auto max-h-24">
-              {String(input.content).substring(0, 300)}
-              {String(input.content).length > 300 && <span className="text-green-400/50">...</span>}
-            </pre>
-          )}
-
-          {/* Bash command */}
-          {tool === 'Bash' && input.command && (
-            <pre className="p-2 bg-gray-950 rounded text-yellow-200 font-mono whitespace-pre-wrap overflow-x-auto">
-              <span className="text-yellow-500">$</span> {String(input.command)}
-            </pre>
-          )}
-
-          {/* Result output */}
-          {result?.output && (
-            <pre className="p-2 bg-gray-900 rounded text-gray-300 whitespace-pre-wrap overflow-x-auto max-h-24">
-              {result.output.substring(0, 300)}
-              {result.output.length > 300 && <span className="text-gray-500">...</span>}
-            </pre>
-          )}
-
-          {/* Error */}
-          {result?.error && (
-            <div className="text-red-400 bg-red-950/30 p-2 rounded">
-              {result.error.substring(0, 200)}
-            </div>
-          )}
-
-          {/* Generic input for other tools */}
-          {!['Read', 'Write', 'Edit', 'Bash'].includes(tool) && Object.keys(input).length > 0 && (
-            <pre className="p-2 bg-gray-900 rounded text-gray-400 whitespace-pre-wrap overflow-x-auto max-h-24">
-              {JSON.stringify(input, null, 2).substring(0, 300)}
-            </pre>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -208,6 +290,9 @@ interface ToolStackProps {
 export default function ToolStack({ activity, isStreaming }: ToolStackProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const toolPairs = parseActivityPairs(activity);
+  const [modalIndex, setModalIndex] = useState<number | null>(null);
+
+  const closeModal = useCallback(() => setModalIndex(null), []);
 
   // Auto-scroll to bottom when new tools arrive
   useEffect(() => {
@@ -221,14 +306,16 @@ export default function ToolStack({ activity, isStreaming }: ToolStackProps) {
     return null;
   }
 
+  const modalPair = modalIndex !== null ? toolPairs[modalIndex] : null;
+
   return (
-    <div className="border-t border-gray-700 bg-gray-900/80">
+    <div className="border-t border-[var(--color-border-default)] bg-[var(--color-bg-primary)]/80">
       {/* Header */}
-      <div className="px-3 py-1.5 flex items-center gap-2 border-b border-gray-800">
-        <span className="text-xs text-gray-500 font-medium">Tools</span>
-        <span className="text-xs text-gray-600">({toolPairs.length})</span>
+      <div className="px-3 py-1.5 flex items-center gap-2 border-b border-[var(--color-border-subtle)]">
+        <span className="text-xs text-[var(--color-text-tertiary)] font-medium">Tools</span>
+        <span className="text-xs text-[var(--color-text-muted)]">({toolPairs.length})</span>
         {isStreaming && (
-          <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
+          <span className="w-1.5 h-1.5 bg-[var(--color-accent)] rounded-full animate-pulse" />
         )}
       </div>
 
@@ -245,9 +332,21 @@ export default function ToolStack({ activity, isStreaming }: ToolStackProps) {
             result={pair.result}
             timestamp={pair.timestamp}
             isLatest={isStreaming && i === toolPairs.length - 1 && !pair.result}
+            onOpenDetail={() => setModalIndex(i)}
           />
         ))}
       </div>
+
+      {/* Detail modal */}
+      {modalPair && (
+        <ToolDetailModal
+          tool={modalPair.tool}
+          input={modalPair.input}
+          result={modalPair.result}
+          timestamp={modalPair.timestamp}
+          onClose={closeModal}
+        />
+      )}
     </div>
   );
 }
