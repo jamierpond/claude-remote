@@ -8,9 +8,6 @@ importers:
 
   .:
     dependencies:
-      '@types/prismjs':
-        specifier: ^1.26.5
-        version: 1.26.5
       argon2:
         specifier: ^0.44.0
         version: 0.44.0
@@ -42,6 +39,9 @@ importers:
       '@types/node':
         specifier: ^20
         version: 20.19.30
+      '@types/prismjs':
+        specifier: ^1.26.5
+        version: 1.26.5
       '@types/react':
         specifier: ^19
         version: 19.2.10
