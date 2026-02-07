@@ -46,6 +46,7 @@ import {
   saveProjectSessionId,
 } from './src/lib/store';
 import { spawnClaude, ClaudeEvent } from './src/lib/claude';
+import { initVapid, getVapidPublicKey, addSubscription, removeSubscription, sendPushToAll } from './src/lib/push';
 
 // Track active Claude processes per device per project
 // Key format: `${deviceId}:${projectId}` or just `${deviceId}` for legacy
@@ -301,6 +302,12 @@ function findDeviceByDecryption(encrypted: EncryptedData): Device | null {
 function json(res: ServerResponse, data: object, status = 200) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(data));
+}
+
+async function readBody(req: IncomingMessage): Promise<string> {
+  let body = '';
+  for await (const chunk of req) body += chunk;
+  return body;
 }
 
 // API authentication: compare PIN using timing-safe comparison
@@ -749,6 +756,33 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     }
   }
 
+  // API: Push notifications - VAPID public key
+  if (pathname === '/api/push/vapid' && method === 'GET') {
+    const publicKey = getVapidPublicKey();
+    if (!publicKey) return json(res, { error: 'Push not initialized' }, 500);
+    return json(res, { publicKey });
+  }
+
+  // API: Push notifications - subscribe
+  if (pathname === '/api/push/subscribe' && method === 'POST') {
+    const body = await readBody(req);
+    const { subscription, deviceId } = JSON.parse(body);
+    if (!subscription || !deviceId) {
+      return json(res, { error: 'Missing subscription or deviceId' }, 400);
+    }
+    addSubscription(deviceId, subscription);
+    return json(res, { ok: true });
+  }
+
+  // API: Push notifications - unsubscribe
+  if (pathname === '/api/push/subscribe' && method === 'DELETE') {
+    const body = await readBody(req);
+    const { deviceId } = JSON.parse(body);
+    if (!deviceId) return json(res, { error: 'Missing deviceId' }, 400);
+    removeSubscription(deviceId);
+    return json(res, { ok: true });
+  }
+
   // API: Pair GET - get server public key
   if (pathname?.startsWith('/pair/') && method === 'GET') {
     reloadState();
@@ -877,6 +911,7 @@ async function main() {
   pinHash = await hashPin(PIN!);
   initializeServer();
   recoverPartialResponses();
+  initVapid();
 
   const server = createServer(handleRequest);
   const wss = new WebSocketServer({ noServer: true });
@@ -1212,6 +1247,10 @@ async function main() {
                 sessionId: currentSessionId || '',
               });
               console.log(`[${deviceId}] AskUserQuestion detected, stored pending question`);
+              // Push notification for AskUserQuestion
+              const questionText = (event.toolUse.input.questions as Array<{question: string}>)?.[0]?.question || 'Claude has a question';
+              sendPushToAll('Question from Claude', questionText, '/').catch(err =>
+                console.error('[push] Failed to send AskUserQuestion push:', err));
             }
           } else if (event.type === 'tool_result' && event.toolResult) {
             assistantActivity.push({
@@ -1245,6 +1284,10 @@ async function main() {
                 addMessage(assistantMsg);
               }
             }
+            // Push notification for task completion
+            const snippet = assistantText.slice(0, 100) || 'Task finished';
+            sendPushToAll('Task complete', snippet, '/').catch(err =>
+              console.error('[push] Failed to send done push:', err));
             // Clear pending debounced writes and partial response file
             pendingPartials.delete(jKey);
             clearPartialResponse(jKey);
@@ -1411,6 +1454,10 @@ async function main() {
                 projectId,
                 sessionId: currentSessionId || '',
               });
+              // Push notification for AskUserQuestion (answer flow)
+              const questionText = (event.toolUse.input.questions as Array<{question: string}>)?.[0]?.question || 'Claude has a question';
+              sendPushToAll('Question from Claude', questionText, '/').catch(err =>
+                console.error('[push] Failed to send AskUserQuestion push:', err));
             }
           } else if (event.type === 'tool_result' && event.toolResult) {
             ansAssistantActivity.push({
@@ -1441,6 +1488,10 @@ async function main() {
                 addMessage(assistantMsg);
               }
             }
+            // Push notification for task completion (answer flow)
+            const snippet = ansAssistantText.slice(0, 100) || 'Task finished';
+            sendPushToAll('Task complete', snippet, '/').catch(err =>
+              console.error('[push] Failed to send done push:', err));
             pendingPartials.delete(jKey);
             clearPartialResponse(jKey);
             activeJobs.delete(jKey);

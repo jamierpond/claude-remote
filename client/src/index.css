@@ -52,6 +52,11 @@ body {
   color: var(--color-text-primary);
 }
 
+.break-anywhere {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 /* Prism syntax highlighting - warm dark theme */
 .token.comment,
 .token.prolog,

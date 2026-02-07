@@ -10,6 +10,7 @@ import AskUserQuestionCard from '../components/AskUserQuestionCard';
 import { apiFetch } from '../lib/api';
 import { importPublicKey, deriveSharedSecret, encrypt, decrypt, type EncryptedData } from '../lib/crypto-client';
 import { type ServerConfig, getServerPin, setServerPin, clearServerPin } from '../lib/servers';
+import { registerServiceWorker, subscribeToPush, isPushSupported, getPushPermission } from '../lib/push-client';
 
 
 interface Props {
@@ -180,6 +181,7 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [showFileTree, setShowFileTree] = useState(false);
   const [showDiffViewer, setShowDiffViewer] = useState(false);
+  const [showPushBanner, setShowPushBanner] = useState(false);
   const tabsRestoredRef = useRef(false);
 
   // Refs for streaming (per-project)
@@ -480,6 +482,29 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
           setIsReconnecting(false);
           setReconnectAttempt(0);
           reconnectAttemptRef.current = 0;
+
+          // Register service worker and handle push notifications
+          registerServiceWorker().then(reg => {
+            console.log('[push] SW registered:', !!reg, 'supported:', isPushSupported(), 'permission:', getPushPermission());
+            if (!reg) {
+              // No service worker — show banner anyway if in standalone mode (iOS PWA)
+              const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+                || (navigator as unknown as { standalone?: boolean }).standalone === true;
+              console.log('[push] No SW, standalone:', isStandalone);
+              if (isStandalone) setShowPushBanner(true);
+              return;
+            }
+            const perm = getPushPermission();
+            if (perm === 'granted') {
+              subscribeToPush(serverConfig.id, serverConfig.serverUrl, serverConfig.deviceId);
+            } else if (perm !== 'denied') {
+              // Show banner for 'default' or 'unsupported' — let the user try
+              setShowPushBanner(true);
+            }
+          }).catch(err => {
+            console.error('[push] Setup failed:', err);
+            setShowPushBanner(true); // Show banner anyway so user can attempt
+          });
 
           const activeIds = msg.activeProjectIds || [];
           if (activeIds.length > 0) {
@@ -1083,6 +1108,33 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
         </div>
       )}
 
+      {/* Push notification enable banner */}
+      {showPushBanner && (
+        <div className="flex items-center justify-between px-4 py-2 bg-[var(--color-accent)]/20 border-b border-[var(--color-accent)]/30 text-sm">
+          <span className="text-[var(--color-text-primary)]">Enable notifications?</span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                subscribeToPush(serverConfig.id, serverConfig.serverUrl, serverConfig.deviceId, true)
+                  .then(ok => {
+                    if (ok) console.log('[push] Subscribed via banner');
+                  });
+                setShowPushBanner(false);
+              }}
+              className="px-3 py-1 text-xs font-medium bg-[var(--color-accent)] text-white rounded transition-colors"
+            >
+              Enable
+            </button>
+            <button
+              onClick={() => setShowPushBanner(false)}
+              className="px-3 py-1 text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+            >
+              Later
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Project Picker Modal */}
       <ProjectPicker
         isOpen={showProjectPicker}
@@ -1133,10 +1185,10 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
             {messages.map((msg, i) => (
               <div key={i}>
                 {msg.role === 'user' ? (
-                  <div className="flex justify-end">
-                    <div className="max-w-[90%] sm:max-w-[85%]">
-                      <div className="rounded-2xl px-4 py-3 bg-[var(--color-accent)]">
-                        <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                  <div className="flex justify-end min-w-0">
+                    <div className="max-w-[90%] sm:max-w-[85%] min-w-0">
+                      <div className="rounded-2xl px-4 py-3 bg-[var(--color-accent)] overflow-hidden">
+                        <div className="whitespace-pre-wrap break-anywhere">{msg.content}</div>
                       </div>
                     </div>
                   </div>
