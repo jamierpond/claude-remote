@@ -4,20 +4,22 @@ interface ChatInputProps {
   isStreaming: boolean;
   onSend: (text: string) => void;
   onCancel: () => void;
+  serverId?: string;
 }
 
-export default memo(function ChatInput({ isStreaming, onSend, onCancel }: ChatInputProps) {
-  const [input, setInputRaw] = useState(() => localStorage.getItem('claude-remote-draft') || '');
+export default memo(function ChatInput({ isStreaming, onSend, onCancel, serverId }: ChatInputProps) {
+  const draftKey = serverId ? `claude-remote-draft-${serverId}` : 'claude-remote-draft';
+  const [input, setInputRaw] = useState(() => localStorage.getItem(draftKey) || '');
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const setInput = useCallback((v: string) => {
     setInputRaw(v);
     if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
     draftTimerRef.current = setTimeout(() => {
-      if (v) localStorage.setItem('claude-remote-draft', v);
-      else localStorage.removeItem('claude-remote-draft');
+      if (v) localStorage.setItem(draftKey, v);
+      else localStorage.removeItem(draftKey);
     }, 500);
-  }, []);
+  }, [draftKey]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

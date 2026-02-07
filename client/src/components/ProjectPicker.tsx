@@ -7,6 +7,8 @@ interface ProjectPickerProps {
   onClose: () => void;
   onSelect: (project: Project) => void;
   openProjectIds: Set<string>;
+  serverId?: string;
+  serverUrl?: string;
 }
 
 export default function ProjectPicker({
@@ -14,6 +16,8 @@ export default function ProjectPicker({
   onClose,
   onSelect,
   openProjectIds,
+  serverId,
+  serverUrl,
 }: ProjectPickerProps) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(false);
@@ -30,7 +34,7 @@ export default function ProjectPicker({
     setLoading(true);
     setError(null);
     try {
-      const res = await apiFetch('/api/projects');
+      const res = await apiFetch('/api/projects', { serverId, serverUrl });
       if (!res.ok) throw new Error('Failed to fetch projects');
       const data = await res.json();
       setProjects(data.projects || []);

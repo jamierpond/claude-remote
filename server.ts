@@ -7,7 +7,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { randomBytes, timingSafeEqual } from 'crypto';
 import { readFileSync, existsSync, appendFileSync, writeFileSync } from 'fs';
 import { execSync } from 'child_process';
-import { homedir } from 'os';
+import { homedir, hostname } from 'os';
 import qrcode from 'qrcode-terminal';
 import { join, resolve } from 'path';
 import {
@@ -325,8 +325,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   const { pathname } = parse(req.url || '', true);
   const method = req.method || 'GET';
 
-  // CORS: restrict to known origins
-  const allowedOrigins = [clientUrl, 'https://ai.pond.audio'];
+  // CORS: restrict to known origins + configurable extras for multi-server
+  const extraOrigins = (process.env.CORS_ORIGINS || '').split(',').filter(Boolean);
+  const allowedOrigins = [clientUrl, 'https://ai.pond.audio', ...extraOrigins];
   const origin = req.headers['origin'];
   if (origin && allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
@@ -359,11 +360,14 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return pinBuf.length === providedBuf.length && timingSafeEqual(pinBuf, providedBuf);
     })();
 
+    const serverName = process.env.SERVER_NAME || hostname();
+
     if (isAuthed) {
       return json(res, {
         paired: devices.length > 0,
         devices: devices.map(d => ({ id: d.id, createdAt: d.createdAt })),
         deviceCount: devices.length,
+        serverName,
         pairingUrl: serverState.pairingToken ? `${clientUrl}/pair?server=${encodeURIComponent(serverUrl)}&token=${serverState.pairingToken}` : null,
       });
     }
@@ -372,6 +376,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     return json(res, {
       paired: devices.length > 0,
       deviceCount: devices.length,
+      serverName,
     });
   }
 
