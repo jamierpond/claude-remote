@@ -4,10 +4,13 @@ import ProjectPicker from '../components/ProjectPicker';
 import StreamingResponse, { type ToolActivity } from '../components/StreamingResponse';
 import ChatInput from '../components/ChatInput';
 import GitStatus from '../components/GitStatus';
+import FileTree from '../components/FileTree';
+import DiffViewer from '../components/DiffViewer';
 import AskUserQuestionCard from '../components/AskUserQuestionCard';
 import { apiFetch } from '../lib/api';
 import { importPublicKey, deriveSharedSecret, encrypt, decrypt, type EncryptedData } from '../lib/crypto-client';
 import { type ServerConfig, getServerPin, setServerPin, clearServerPin } from '../lib/servers';
+import { registerServiceWorker, subscribeToPush, isPushSupported, getPushPermission } from '../lib/push-client';
 
 
 interface Props {
@@ -55,6 +58,96 @@ interface ProjectState {
   pendingQuestion: PendingQuestionData | null;
 }
 
+interface OverflowMenuProps {
+  onBrowseFiles: () => void;
+  onViewChanges: () => void;
+  onReset: () => void;
+  onClearHistory: () => void;
+  onSwitchServer: () => void;
+  hasProject: boolean;
+  canClear: boolean;
+  serverName: string;
+}
+
+function OverflowMenu({ onBrowseFiles, onViewChanges, onReset, onClearHistory, onSwitchServer, hasProject, canClear, serverName }: OverflowMenuProps) {
+  const [open, setOpen] = useState(false);
+
+  const menuItem = (onClick: () => void, icon: React.ReactNode, label: string, disabled = false) => (
+    <button
+      onClick={() => { onClick(); setOpen(false); }}
+      disabled={disabled}
+      className="w-full flex items-center gap-3 px-4 py-3 text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] active:bg-[var(--color-bg-hover)] transition-colors disabled:opacity-40 disabled:pointer-events-none"
+    >
+      <span className="text-[var(--color-text-secondary)]">{icon}</span>
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="shrink-0 p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+        title="More actions"
+        aria-label="More actions"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M6 10a2 2 0 11-4 0 2 2 0 014 0zM12 10a2 2 0 11-4 0 2 2 0 014 0zM16 12a2 2 0 100-4 2 2 0 000 4z" />
+        </svg>
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full mt-1 z-50 w-52 bg-[var(--color-bg-secondary)] border border-[var(--color-border-default)] rounded-lg shadow-xl overflow-hidden">
+            {hasProject && menuItem(
+              onBrowseFiles,
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
+              </svg>,
+              'Browse files'
+            )}
+            {hasProject && menuItem(
+              onViewChanges,
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 4a.5.5 0 01.5.5v3h3a.5.5 0 010 1h-3v3a.5.5 0 01-1 0v-3h-3a.5.5 0 010-1h3v-3A.5.5 0 018 4z" />
+                <path d="M13.5 0H2.5A2.5 2.5 0 000 2.5v11A2.5 2.5 0 002.5 16h11a2.5 2.5 0 002.5-2.5v-11A2.5 2.5 0 0013.5 0zM1 2.5A1.5 1.5 0 012.5 1H8v6.5H1V2.5zM1 8.5h7V15H2.5A1.5 1.5 0 011 13.5V8.5zM9 15V8.5h6v5a1.5 1.5 0 01-1.5 1.5H9zm6-7.5H9V1h4.5A1.5 1.5 0 0115 2.5v5z" />
+              </svg>,
+              'View changes'
+            )}
+            {menuItem(
+              onReset,
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+              </svg>,
+              'Reset state'
+            )}
+            {menuItem(
+              onClearHistory,
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>,
+              'Clear history',
+              !canClear
+            )}
+
+            <div className="border-t border-[var(--color-border-default)]" />
+
+            {menuItem(
+              onSwitchServer,
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M2 5a2 2 0 012-2h12a2 2 0 012 2v2a2 2 0 01-2 2H4a2 2 0 01-2-2V5zm14 1a1 1 0 11-2 0 1 1 0 012 0zM2 13a2 2 0 012-2h12a2 2 0 012 2v2a2 2 0 01-2 2H4a2 2 0 01-2-2v-2zm14 1a1 1 0 11-2 0 1 1 0 012 0z" clipRule="evenodd" />
+              </svg>,
+              serverName
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function createEmptyProjectState(): ProjectState {
   return {
     messages: [],
@@ -86,6 +179,9 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
   const [projectStates, setProjectStates] = useState<Map<string, ProjectState>>(new Map());
   const [streamingProjectIds, setStreamingProjectIds] = useState<Set<string>>(new Set());
   const [showProjectPicker, setShowProjectPicker] = useState(false);
+  const [showFileTree, setShowFileTree] = useState(false);
+  const [showDiffViewer, setShowDiffViewer] = useState(false);
+  const [showPushBanner, setShowPushBanner] = useState(false);
   const tabsRestoredRef = useRef(false);
 
   // Refs for streaming (per-project)
@@ -386,6 +482,29 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
           setIsReconnecting(false);
           setReconnectAttempt(0);
           reconnectAttemptRef.current = 0;
+
+          // Register service worker and handle push notifications
+          registerServiceWorker().then(reg => {
+            console.log('[push] SW registered:', !!reg, 'supported:', isPushSupported(), 'permission:', getPushPermission());
+            if (!reg) {
+              // No service worker — show banner anyway if in standalone mode (iOS PWA)
+              const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+                || (navigator as unknown as { standalone?: boolean }).standalone === true;
+              console.log('[push] No SW, standalone:', isStandalone);
+              if (isStandalone) setShowPushBanner(true);
+              return;
+            }
+            const perm = getPushPermission();
+            if (perm === 'granted') {
+              subscribeToPush(serverConfig.id, serverConfig.serverUrl, serverConfig.deviceId);
+            } else if (perm !== 'denied') {
+              // Show banner for 'default' or 'unsupported' — let the user try
+              setShowPushBanner(true);
+            }
+          }).catch(err => {
+            console.error('[push] Setup failed:', err);
+            setShowPushBanner(true); // Show banner anyway so user can attempt
+          });
 
           const activeIds = msg.activeProjectIds || [];
           if (activeIds.length > 0) {
@@ -928,7 +1047,7 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
 
   return (
     <main className="h-[100dvh] flex flex-col bg-[var(--color-bg-primary)] text-[var(--color-text-primary)]">
-      {/* Project Tabs */}
+      {/* Row 1: Project Tabs */}
       <ProjectTabs
         projects={openProjects}
         activeProjectId={activeProjectId}
@@ -938,16 +1057,9 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
         onAddProject={() => setShowProjectPicker(true)}
       />
 
-      {/* Header */}
+      {/* Row 2: Project name + git status + overflow menu */}
       <header className="flex items-center justify-between px-4 py-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-primary)] sticky top-0 z-10">
         <div className="flex items-center gap-3 min-w-0 flex-1">
-          <button
-            onClick={() => onNavigate('servers')}
-            className="shrink-0 text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-accent)] transition-colors bg-[var(--color-bg-secondary)] px-2 py-1 rounded"
-            title="Switch server"
-          >
-            {serverConfig.name}
-          </button>
           <h1 className="text-lg font-semibold truncate">
             {activeProjectId
               ? openProjects.find(p => p.id === activeProjectId)?.name || activeProjectId
@@ -959,31 +1071,16 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
             serverUrl={serverConfig.serverUrl}
           />
         </div>
-        <div className="flex gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={handleReset}
-            className="p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
-            title="Reset stuck state"
-            aria-label="Reset"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={clearHistory}
-            disabled={isStreaming || !activeProjectId}
-            className="p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-50"
-            title="Clear conversation history"
-            aria-label="Clear history"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-            </svg>
-          </button>
-        </div>
+        <OverflowMenu
+          onBrowseFiles={() => setShowFileTree(true)}
+          onViewChanges={() => setShowDiffViewer(true)}
+          onReset={handleReset}
+          onClearHistory={clearHistory}
+          onSwitchServer={() => onNavigate('servers')}
+          hasProject={!!activeProjectId}
+          canClear={!isStreaming && !!activeProjectId}
+          serverName={serverConfig.name}
+        />
       </header>
 
       {/* Reconnecting banner */}
@@ -1011,6 +1108,33 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
         </div>
       )}
 
+      {/* Push notification enable banner */}
+      {showPushBanner && (
+        <div className="flex items-center justify-between px-4 py-2 bg-[var(--color-accent)]/20 border-b border-[var(--color-accent)]/30 text-sm">
+          <span className="text-[var(--color-text-primary)]">Enable notifications?</span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                subscribeToPush(serverConfig.id, serverConfig.serverUrl, serverConfig.deviceId, true)
+                  .then(ok => {
+                    if (ok) console.log('[push] Subscribed via banner');
+                  });
+                setShowPushBanner(false);
+              }}
+              className="px-3 py-1 text-xs font-medium bg-[var(--color-accent)] text-white rounded transition-colors"
+            >
+              Enable
+            </button>
+            <button
+              onClick={() => setShowPushBanner(false)}
+              className="px-3 py-1 text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+            >
+              Later
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Project Picker Modal */}
       <ProjectPicker
         isOpen={showProjectPicker}
@@ -1019,6 +1143,24 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
         openProjectIds={openProjectIds}
         serverId={serverConfig.id}
         serverUrl={serverConfig.serverUrl}
+      />
+
+      {/* File Tree Modal */}
+      <FileTree
+        projectId={activeProjectId}
+        serverId={serverConfig.id}
+        serverUrl={serverConfig.serverUrl}
+        isOpen={showFileTree}
+        onClose={() => setShowFileTree(false)}
+      />
+
+      {/* Diff Viewer Modal */}
+      <DiffViewer
+        projectId={activeProjectId}
+        serverId={serverConfig.id}
+        serverUrl={serverConfig.serverUrl}
+        isOpen={showDiffViewer}
+        onClose={() => setShowDiffViewer(false)}
       />
 
       {/* Messages */}
@@ -1043,10 +1185,10 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
             {messages.map((msg, i) => (
               <div key={i}>
                 {msg.role === 'user' ? (
-                  <div className="flex justify-end">
-                    <div className="max-w-[90%] sm:max-w-[85%]">
-                      <div className="rounded-2xl px-4 py-3 bg-[var(--color-accent)]">
-                        <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                  <div className="flex justify-end min-w-0">
+                    <div className="max-w-[90%] sm:max-w-[85%] min-w-0">
+                      <div className="rounded-2xl px-4 py-3 bg-[var(--color-accent)] overflow-hidden">
+                        <div className="whitespace-pre-wrap break-anywhere">{msg.content}</div>
                       </div>
                     </div>
                   </div>

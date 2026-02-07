@@ -5,7 +5,7 @@ import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { parse } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
 import { randomBytes, timingSafeEqual } from 'crypto';
-import { readFileSync, existsSync, appendFileSync, writeFileSync } from 'fs';
+import { readFileSync, existsSync, appendFileSync, writeFileSync, readdirSync, statSync } from 'fs';
 import { execSync } from 'child_process';
 import { homedir, hostname } from 'os';
 import qrcode from 'qrcode-terminal';
@@ -46,6 +46,7 @@ import {
   saveProjectSessionId,
 } from './src/lib/store';
 import { spawnClaude, ClaudeEvent } from './src/lib/claude';
+import { initVapid, getVapidPublicKey, addSubscription, removeSubscription, sendPushToAll } from './src/lib/push';
 
 // Track active Claude processes per device per project
 // Key format: `${deviceId}:${projectId}` or just `${deviceId}` for legacy
@@ -301,6 +302,12 @@ function findDeviceByDecryption(encrypted: EncryptedData): Device | null {
 function json(res: ServerResponse, data: object, status = 200) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(data));
+}
+
+async function readBody(req: IncomingMessage): Promise<string> {
+  let body = '';
+  for await (const chunk of req) body += chunk;
+  return body;
 }
 
 // API authentication: compare PIN using timing-safe comparison
@@ -590,6 +597,192 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     }
   }
 
+  // API: File tree - browse project files
+  // Pattern: /api/projects/:id/tree or /api/projects/:id/tree/subdir/path
+  if (pathname?.startsWith('/api/projects/') && pathname.match(/\/tree(\/|$)/) && method === 'GET') {
+    const afterProjects = pathname.split('/api/projects/')[1];
+    const treeIdx = afterProjects.indexOf('/tree');
+    const projectId = decodeURIComponent(afterProjects.substring(0, treeIdx));
+    const subPath = decodeURIComponent(afterProjects.substring(treeIdx + '/tree'.length).replace(/^\//, ''));
+
+    if (!validateProjectId(projectId)) return json(res, { error: 'Invalid project ID' }, 400);
+    const project = getProject(projectId);
+    if (!project) return json(res, { error: 'Project not found' }, 404);
+
+    const targetDir = resolve(project.path, subPath || '.');
+    if (!targetDir.startsWith(project.path)) {
+      return json(res, { error: 'Path traversal not allowed' }, 400);
+    }
+
+    try {
+      const names = readdirSync(targetDir);
+      const entries: Array<{ name: string; type: 'file' | 'dir'; size?: number; modified?: string }> = [];
+
+      for (const name of names) {
+        if (name.startsWith('.') || name === 'node_modules') continue;
+        try {
+          const stat = statSync(join(targetDir, name));
+          entries.push({
+            name,
+            type: stat.isDirectory() ? 'dir' : 'file',
+            size: stat.isDirectory() ? undefined : stat.size,
+            modified: stat.mtime.toISOString(),
+          });
+        } catch {
+          // Skip entries we can't stat
+        }
+      }
+
+      // Directories first, then alphabetical
+      entries.sort((a, b) => {
+        if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+
+      return json(res, { entries, path: subPath || '' });
+    } catch (err) {
+      console.log(`[api] File tree failed for ${projectId}/${subPath}:`, err);
+      return json(res, { error: 'Directory not found' }, 404);
+    }
+  }
+
+  // API: File content - read a file
+  // Pattern: /api/projects/:id/blob/path/to/file
+  if (pathname?.startsWith('/api/projects/') && pathname.match(/\/blob\//) && method === 'GET') {
+    const afterProjects = pathname.split('/api/projects/')[1];
+    const blobIdx = afterProjects.indexOf('/blob/');
+    const projectId = decodeURIComponent(afterProjects.substring(0, blobIdx));
+    const filePath = decodeURIComponent(afterProjects.substring(blobIdx + '/blob/'.length));
+
+    if (!validateProjectId(projectId)) return json(res, { error: 'Invalid project ID' }, 400);
+    if (!filePath) return json(res, { error: 'No file path specified' }, 400);
+    const project = getProject(projectId);
+    if (!project) return json(res, { error: 'Project not found' }, 404);
+
+    const fullPath = resolve(project.path, filePath);
+    if (!fullPath.startsWith(project.path)) {
+      return json(res, { error: 'Path traversal not allowed' }, 400);
+    }
+
+    try {
+      const stat = statSync(fullPath);
+      if (stat.isDirectory()) return json(res, { error: 'Path is a directory' }, 400);
+
+      // Limit file size to 1MB
+      if (stat.size > 1024 * 1024) {
+        return json(res, { error: 'File too large (>1MB)', size: stat.size }, 400);
+      }
+
+      const content = readFileSync(fullPath, 'utf-8');
+      return json(res, { content, path: filePath, size: stat.size });
+    } catch (err) {
+      console.log(`[api] File read failed for ${projectId}/${filePath}:`, err);
+      return json(res, { error: 'File not found' }, 404);
+    }
+  }
+
+  // API: Diff - list changed files or get diff for a specific file
+  // Pattern: /api/projects/:id/diff or /api/projects/:id/diff/path/to/file
+  if (pathname?.startsWith('/api/projects/') && pathname.match(/\/diff(\/|$)/) && method === 'GET') {
+    const afterProjects = pathname.split('/api/projects/')[1];
+    const diffIdx = afterProjects.indexOf('/diff');
+    const projectId = decodeURIComponent(afterProjects.substring(0, diffIdx));
+    const filePath = decodeURIComponent(afterProjects.substring(diffIdx + '/diff'.length).replace(/^\//, ''));
+
+    if (!validateProjectId(projectId)) return json(res, { error: 'Invalid project ID' }, 400);
+    const project = getProject(projectId);
+    if (!project) return json(res, { error: 'Project not found' }, 404);
+
+    try {
+      if (!filePath) {
+        // List all changed files
+        const status = execSync('git status --porcelain', {
+          cwd: project.path, encoding: 'utf-8', timeout: 5000,
+        }).trim();
+
+        if (!status) return json(res, { files: [] });
+
+        const files = status.split('\n').map(line => {
+          const match = line.match(/^(..) (.+)$/);
+          const st = match ? match[1].trim() : '?';
+          const path = match ? match[2] : line.trim();
+          return { path, status: st };
+        });
+
+        return json(res, { files });
+      } else {
+        // Get diff for a specific file
+        const fullPath = resolve(project.path, filePath);
+        if (!fullPath.startsWith(project.path)) {
+          return json(res, { error: 'Path traversal not allowed' }, 400);
+        }
+
+        // Check if it's an untracked file
+        const status = execSync(`git status --porcelain -- ${JSON.stringify(filePath)}`, {
+          cwd: project.path, encoding: 'utf-8', timeout: 5000,
+        }).trim();
+
+        const isNew = status.startsWith('??');
+
+        if (isNew) {
+          // Untracked file — show full contents as new
+          const content = readFileSync(fullPath, 'utf-8');
+          const diffLines = content.split('\n').map(l => `+${l}`).join('\n');
+          return json(res, { diff: diffLines, path: filePath, isNew: true });
+        }
+
+        // Get unified diff (staged + unstaged vs HEAD)
+        let diff = '';
+        try {
+          diff = execSync(`git diff HEAD -- ${JSON.stringify(filePath)}`, {
+            cwd: project.path, encoding: 'utf-8', timeout: 10000,
+          });
+        } catch {
+          // May fail if file is staged but not committed yet (new file added)
+          try {
+            diff = execSync(`git diff --cached -- ${JSON.stringify(filePath)}`, {
+              cwd: project.path, encoding: 'utf-8', timeout: 10000,
+            });
+          } catch {
+            diff = '';
+          }
+        }
+
+        return json(res, { diff, path: filePath, isNew: false });
+      }
+    } catch (err) {
+      console.log(`[api] Diff failed for ${projectId}/${filePath}:`, err);
+      return json(res, { error: 'Failed to get diff' }, 500);
+    }
+  }
+
+  // API: Push notifications - VAPID public key
+  if (pathname === '/api/push/vapid' && method === 'GET') {
+    const publicKey = getVapidPublicKey();
+    if (!publicKey) return json(res, { error: 'Push not initialized' }, 500);
+    return json(res, { publicKey });
+  }
+
+  // API: Push notifications - subscribe
+  if (pathname === '/api/push/subscribe' && method === 'POST') {
+    const body = await readBody(req);
+    const { subscription, deviceId } = JSON.parse(body);
+    if (!subscription || !deviceId) {
+      return json(res, { error: 'Missing subscription or deviceId' }, 400);
+    }
+    addSubscription(deviceId, subscription);
+    return json(res, { ok: true });
+  }
+
+  // API: Push notifications - unsubscribe
+  if (pathname === '/api/push/subscribe' && method === 'DELETE') {
+    const body = await readBody(req);
+    const { deviceId } = JSON.parse(body);
+    if (!deviceId) return json(res, { error: 'Missing deviceId' }, 400);
+    removeSubscription(deviceId);
+    return json(res, { ok: true });
+  }
+
   // API: Pair GET - get server public key
   if (pathname?.startsWith('/pair/') && method === 'GET') {
     reloadState();
@@ -718,6 +911,7 @@ async function main() {
   pinHash = await hashPin(PIN!);
   initializeServer();
   recoverPartialResponses();
+  initVapid();
 
   const server = createServer(handleRequest);
   const wss = new WebSocketServer({ noServer: true });
@@ -1053,6 +1247,10 @@ async function main() {
                 sessionId: currentSessionId || '',
               });
               console.log(`[${deviceId}] AskUserQuestion detected, stored pending question`);
+              // Push notification for AskUserQuestion
+              const questionText = (event.toolUse.input.questions as Array<{question: string}>)?.[0]?.question || 'Claude has a question';
+              sendPushToAll('Question from Claude', questionText, '/').catch(err =>
+                console.error('[push] Failed to send AskUserQuestion push:', err));
             }
           } else if (event.type === 'tool_result' && event.toolResult) {
             assistantActivity.push({
@@ -1086,6 +1284,10 @@ async function main() {
                 addMessage(assistantMsg);
               }
             }
+            // Push notification for task completion
+            const snippet = assistantText.slice(0, 100) || 'Task finished';
+            sendPushToAll('Task complete', snippet, '/').catch(err =>
+              console.error('[push] Failed to send done push:', err));
             // Clear pending debounced writes and partial response file
             pendingPartials.delete(jKey);
             clearPartialResponse(jKey);
@@ -1252,6 +1454,10 @@ async function main() {
                 projectId,
                 sessionId: currentSessionId || '',
               });
+              // Push notification for AskUserQuestion (answer flow)
+              const questionText = (event.toolUse.input.questions as Array<{question: string}>)?.[0]?.question || 'Claude has a question';
+              sendPushToAll('Question from Claude', questionText, '/').catch(err =>
+                console.error('[push] Failed to send AskUserQuestion push:', err));
             }
           } else if (event.type === 'tool_result' && event.toolResult) {
             ansAssistantActivity.push({
@@ -1282,6 +1488,10 @@ async function main() {
                 addMessage(assistantMsg);
               }
             }
+            // Push notification for task completion (answer flow)
+            const snippet = ansAssistantText.slice(0, 100) || 'Task finished';
+            sendPushToAll('Task complete', snippet, '/').catch(err =>
+              console.error('[push] Failed to send done push:', err));
             pendingPartials.delete(jKey);
             clearPartialResponse(jKey);
             activeJobs.delete(jKey);

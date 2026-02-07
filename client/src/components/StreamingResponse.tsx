@@ -214,7 +214,7 @@ function TextBlock({ text, isStreaming }: { text: string; isStreaming?: boolean 
     }
     if (paraLines.length > 0) {
       elements.push(
-        <p key={key++} className="text-sm text-[var(--color-text-primary)] leading-relaxed my-2">
+        <p key={key++} className="text-sm text-[var(--color-text-primary)] leading-relaxed my-2 break-anywhere">
           {renderInline(paraLines.join(' '))}
         </p>
       );
@@ -297,7 +297,7 @@ export default memo(function StreamingResponse({
   const currentPhase = phaseLabels[phase];
 
   return (
-    <div className="bg-[var(--color-bg-secondary)] rounded-xl border border-[var(--color-border-default)] overflow-hidden">
+    <div className="bg-[var(--color-bg-secondary)] rounded-xl border border-[var(--color-border-default)] overflow-hidden min-w-0">
       {/* Header */}
       <div className="px-4 py-2.5 bg-[var(--color-bg-tertiary)] border-b border-[var(--color-border-default)] flex items-center justify-between">
         <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -321,7 +321,7 @@ export default memo(function StreamingResponse({
       </div>
 
       {/* Content area */}
-      <div className="p-4 space-y-4">
+      <div className="p-4 space-y-4 overflow-hidden break-anywhere">
         {/* Thinking (collapsed by default) */}
         {thinking && <ThinkingBlock thinking={thinking} isStreaming={isStreaming && phase === 'thinking'} />}
 
