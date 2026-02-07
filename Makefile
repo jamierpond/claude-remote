@@ -1,5 +1,8 @@
 .PHONY: dev build deploy start stop restart status logs logs-client deps docker-up docker-down docker-logs docker-deploy free-ports
 
+PIDFILE := logs/server.pid
+LOGFILE := logs/daemon-server.log
+
 # Install dependencies
 deps:
 	pnpm install
@@ -12,35 +15,61 @@ dev:
 build:
 	pnpm build
 
-# === Systemd (native) ===
-# Server on :6767, Client on :5173
+# === Production (PID-file based) ===
+# Server on :6767 (serves built client static files)
 
-# Build + restart both daemons
+# Build + restart server
 deploy: build
-	@systemctl --user daemon-reload
-	@systemctl --user restart claude-remote claude-remote-client
-	@sleep 1
-	@systemctl --user is-active --quiet claude-remote && echo "Server (:6767) running." || (echo "ERROR: server failed to start" && systemctl --user status claude-remote && exit 1)
-	@systemctl --user is-active --quiet claude-remote-client && echo "Client (:5173) running." || (echo "ERROR: client failed to start" && systemctl --user status claude-remote-client && exit 1)
+	@mkdir -p logs
+	@if [ -f $(PIDFILE) ] && kill -0 $$(cat $(PIDFILE)) 2>/dev/null; then \
+		echo "Stopping existing server (PID $$(cat $(PIDFILE)))..."; \
+		kill $$(cat $(PIDFILE)); \
+		sleep 2; \
+	fi
+	@NODE_ENV=production nohup ./node_modules/.bin/tsx server.ts >> $(LOGFILE) 2>&1 & echo $$! > $(PIDFILE)
+	@sleep 2
+	@if kill -0 $$(cat $(PIDFILE)) 2>/dev/null; then \
+		echo "Server (:6767) running. PID: $$(cat $(PIDFILE))"; \
+	else \
+		echo "ERROR: server failed to start. Check logs:"; \
+		tail -20 $(LOGFILE); \
+		rm -f $(PIDFILE); \
+		exit 1; \
+	fi
 	@echo "Deployed."
 
 start:
-	@systemctl --user start claude-remote claude-remote-client
-	@echo "Both daemons started."
+	@mkdir -p logs
+	@if [ -f $(PIDFILE) ] && kill -0 $$(cat $(PIDFILE)) 2>/dev/null; then \
+		echo "Server already running (PID $$(cat $(PIDFILE)))"; \
+	else \
+		NODE_ENV=production nohup ./node_modules/.bin/tsx server.ts >> $(LOGFILE) 2>&1 & echo $$! > $(PIDFILE); \
+		sleep 1; \
+		echo "Server started (PID $$(cat $(PIDFILE)))"; \
+	fi
 
 stop:
-	@systemctl --user stop claude-remote claude-remote-client
-	@echo "Both daemons stopped."
+	@if [ -f $(PIDFILE) ] && kill -0 $$(cat $(PIDFILE)) 2>/dev/null; then \
+		kill $$(cat $(PIDFILE)); \
+		rm -f $(PIDFILE); \
+		echo "Server stopped."; \
+	else \
+		echo "Server not running."; \
+		rm -f $(PIDFILE); \
+	fi
 
-restart:
-	@systemctl --user restart claude-remote claude-remote-client
-	@echo "Both daemons restarted."
+restart: stop start
 
 status:
-	@systemctl --user status claude-remote claude-remote-client
+	@if [ -f $(PIDFILE) ] && kill -0 $$(cat $(PIDFILE)) 2>/dev/null; then \
+		echo "Server running (PID $$(cat $(PIDFILE)))"; \
+	else \
+		echo "Server not running."; \
+		rm -f $(PIDFILE) 2>/dev/null; \
+	fi
 
 logs:
-	@tail -n 100 -f logs/daemon-server.log
+	@tail -n 100 -f $(LOGFILE)
 
 logs-client:
 	@tail -n 100 -f logs/daemon-client.log
@@ -64,6 +93,7 @@ docker-deploy:
 
 free-ports:
 	@echo "Freeing ports 6767 and 5173..."
-	@fuser -k 6767/tcp 2>/dev/null || true
-	@fuser -k 5173/tcp 2>/dev/null || true
+	@lsof -ti :6767 | xargs kill -9 2>/dev/null || true
+	@lsof -ti :5173 | xargs kill -9 2>/dev/null || true
+	@rm -f $(PIDFILE)
 	@echo "Done"
