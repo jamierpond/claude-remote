@@ -36,9 +36,11 @@ function fileStatusLabel(status: string): string {
 
 interface GitStatusProps {
   projectId: string | null;
+  serverId?: string;
+  serverUrl?: string;
 }
 
-export default function GitStatus({ projectId }: GitStatusProps) {
+export default function GitStatus({ projectId, serverId, serverUrl }: GitStatusProps) {
   const [status, setStatus] = useState<GitStatusData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -54,7 +56,7 @@ export default function GitStatus({ projectId }: GitStatusProps) {
     console.log('[GitStatus] Fetching git status for:', projectId);
     setLoading(true);
     try {
-      const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/git`);
+      const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/git`, { serverId, serverUrl });
       if (!res.ok) {
         const data = await res.json();
         console.error('[GitStatus] API error:', data);

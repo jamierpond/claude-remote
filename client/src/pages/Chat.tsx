@@ -6,11 +6,13 @@ import ChatInput from '../components/ChatInput';
 import GitStatus from '../components/GitStatus';
 import AskUserQuestionCard from '../components/AskUserQuestionCard';
 import { apiFetch } from '../lib/api';
+import { importPublicKey, deriveSharedSecret, encrypt, decrypt, type EncryptedData } from '../lib/crypto-client';
+import { type ServerConfig, getServerPin, setServerPin, clearServerPin } from '../lib/servers';
 
 
 interface Props {
-  token?: string | null;
-  onNavigate: (route: 'home' | 'chat' | 'pair') => void;
+  serverConfig: ServerConfig;
+  onNavigate: (route: 'servers' | 'chat') => void;
 }
 
 interface OutputChunk {
@@ -22,100 +24,16 @@ interface OutputChunk {
 interface Message {
   role: 'user' | 'assistant';
   content: string;
-  task?: string;              // user's original prompt (for assistant messages)
-  chunks?: OutputChunk[];     // structured output chunks
+  task?: string;
+  chunks?: OutputChunk[];
   thinking?: string;
   activity?: ToolActivity[];
   startedAt?: string;
   completedAt?: string;
 }
 
-interface EncryptedData {
-  iv: string;
-  ct: string;
-  tag: string;
-}
+type View = 'pin' | 'chat';
 
-async function generateKeyPair() {
-  return crypto.subtle.generateKey(
-    { name: 'ECDH', namedCurve: 'P-256' },
-    true,
-    ['deriveBits']
-  );
-}
-
-async function exportPublicKey(key: CryptoKey): Promise<string> {
-  const exported = await crypto.subtle.exportKey('raw', key);
-  return btoa(String.fromCharCode(...new Uint8Array(exported)));
-}
-
-async function importPublicKey(base64: string): Promise<CryptoKey> {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return crypto.subtle.importKey(
-    'raw',
-    bytes,
-    { name: 'ECDH', namedCurve: 'P-256' },
-    true,
-    []
-  );
-}
-
-async function deriveSharedSecret(privateKey: CryptoKey, peerPublicKey: CryptoKey): Promise<CryptoKey> {
-  const bits = await crypto.subtle.deriveBits(
-    { name: 'ECDH', public: peerPublicKey },
-    privateKey,
-    256
-  );
-  // Hash with SHA-256 to ensure consistent 32-byte key across platforms
-  const hashed = await crypto.subtle.digest('SHA-256', bits);
-  return crypto.subtle.importKey(
-    'raw',
-    hashed,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt']
-  );
-}
-
-async function encrypt(plaintext: string, key: CryptoKey): Promise<EncryptedData> {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const encoded = new TextEncoder().encode(plaintext);
-  const encrypted = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
-    key,
-    encoded
-  );
-  const ct = new Uint8Array(encrypted.slice(0, -16));
-  const tag = new Uint8Array(encrypted.slice(-16));
-  return {
-    iv: btoa(String.fromCharCode(...iv)),
-    ct: btoa(String.fromCharCode(...ct)),
-    tag: btoa(String.fromCharCode(...tag)),
-  };
-}
-
-async function decrypt(data: EncryptedData, key: CryptoKey): Promise<string> {
-  const iv = Uint8Array.from(atob(data.iv), c => c.charCodeAt(0));
-  const ct = Uint8Array.from(atob(data.ct), c => c.charCodeAt(0));
-  const tag = Uint8Array.from(atob(data.tag), c => c.charCodeAt(0));
-  const combined = new Uint8Array(ct.length + tag.length);
-  combined.set(ct);
-  combined.set(tag, ct.length);
-  const decrypted = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv },
-    key,
-    combined
-  );
-  return new TextDecoder().decode(decrypted);
-}
-
-type View = 'pairing' | 'pin' | 'chat';
-
-// Per-project state container
 interface PendingQuestionData {
   toolUseId: string;
   questions: Array<{
@@ -132,8 +50,8 @@ interface ProjectState {
   currentThinking: string;
   currentResponse: string;
   currentActivity: ToolActivity[];
-  currentTask: string;         // The user prompt for current streaming task
-  taskStartTime: number | null; // When the current task started
+  currentTask: string;
+  taskStartTime: number | null;
   pendingQuestion: PendingQuestionData | null;
 }
 
@@ -150,8 +68,15 @@ function createEmptyProjectState(): ProjectState {
   };
 }
 
-export default function Chat({ token = null }: Props) {
-  const [view, setView] = useState<View>('pairing');
+export default function Chat({ serverConfig, onNavigate }: Props) {
+  // Server-scoped localStorage keys
+  const projectsKey = `claude-remote-projects-${serverConfig.id}`;
+  const activeProjectKey = `claude-remote-active-project-${serverConfig.id}`;
+
+  const [view, setView] = useState<View>(() => {
+    const cached = getServerPin(serverConfig.id);
+    return cached ? 'chat' : 'pin';
+  });
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
 
@@ -177,22 +102,14 @@ export default function Chat({ token = null }: Props) {
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cachedPinRef = useRef<string | null>((() => {
-    try {
-      const stored = localStorage.getItem('claude-remote-pin');
-      if (!stored) return null;
-      const { pin, exp } = JSON.parse(stored);
-      if (Date.now() > exp) {
-        localStorage.removeItem('claude-remote-pin');
-        return null;
-      }
-      return pin as string;
-    } catch {
-      localStorage.removeItem('claude-remote-pin');
-      return null;
-    }
-  })());
+  const cachedPinRef = useRef<string | null>(null);
   const intentionalCloseRef = useRef(false);
+
+  // Initialize cached PIN from server-specific storage
+  if (cachedPinRef.current === null) {
+    const stored = getServerPin(serverConfig.id);
+    cachedPinRef.current = stored?.pin || null;
+  }
 
   // Helper to update project state
   const updateProjectState = useCallback((projectId: string, updater: (state: ProjectState) => ProjectState) => {
@@ -205,7 +122,7 @@ export default function Chat({ token = null }: Props) {
     });
   }, []);
 
-  // Current active project state (for display) — read directly, no callback wrapper
+  // Current active project state
   const activeState = (activeProjectId ? projectStates.get(activeProjectId) : null) || createEmptyProjectState();
   const messages = activeState.messages;
   const isStreaming = activeState.isStreaming;
@@ -215,20 +132,25 @@ export default function Chat({ token = null }: Props) {
   const currentTask = activeState.currentTask;
   const taskStartTime = activeState.taskStartTime;
 
-  // Memoize derived values to avoid re-creating on every render
   const openProjectIds = useMemo(() => new Set(openProjects.map(p => p.id)), [openProjects]);
+
+  // API helper that injects server context
+  const serverFetch = useCallback((path: string, init?: RequestInit) => {
+    return apiFetch(path, {
+      ...init,
+      serverId: serverConfig.id,
+      serverUrl: serverConfig.serverUrl,
+    });
+  }, [serverConfig]);
 
   const scrollToBottom = useCallback((force = false) => {
     if (!messagesEndRef.current) return;
-
-    // Only auto-scroll if user is near the bottom (within 150px) or forced
     const container = messagesEndRef.current.parentElement;
     if (container && !force) {
       const { scrollTop, scrollHeight, clientHeight } = container;
       const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-      if (distanceFromBottom > 150) return; // User scrolled up, don't interrupt
+      if (distanceFromBottom > 150) return;
     }
-
     messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
   }, []);
 
@@ -237,10 +159,8 @@ export default function Chat({ token = null }: Props) {
     console.log(`Fetching conversation history for project: ${projectId}`);
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
-        const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/conversation`);
-        if (!res.ok) {
-          throw new Error(`Failed to fetch history: ${res.status}`);
-        }
+        const res = await serverFetch(`/api/projects/${encodeURIComponent(projectId)}/conversation`);
+        if (!res.ok) throw new Error(`Failed to fetch history: ${res.status}`);
         const data = await res.json();
         console.log(`Loaded conversation for ${projectId}:`, data.messages?.length, 'messages');
         if (data.messages && data.messages.length > 0) {
@@ -264,15 +184,13 @@ export default function Chat({ token = null }: Props) {
             completedAt: m.completedAt,
           }));
           updateProjectState(projectId, state => ({ ...state, messages: loadedMessages }));
-          // Scroll to bottom after messages are rendered
-          // Use requestAnimationFrame to ensure DOM is updated, then scroll
           requestAnimationFrame(() => {
             requestAnimationFrame(() => {
               messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
             });
           });
         }
-        return; // Success
+        return;
       } catch (err) {
         console.error(`Failed to fetch project conversation (attempt ${attempt}/${retries}):`, err);
         if (attempt < retries) {
@@ -281,56 +199,12 @@ export default function Chat({ token = null }: Props) {
       }
     }
     console.error('All retries failed for project conversation');
-  }, [updateProjectState]);
-
-  // Fetch streaming state for a project (to restore in-progress responses on reconnect)
-  const fetchProjectStreamingState = useCallback(async (projectId: string) => {
-    console.log(`Fetching streaming state for project: ${projectId}`);
-    try {
-      const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/streaming`);
-      if (!res.ok) {
-        throw new Error(`Failed to fetch streaming state: ${res.status}`);
-      }
-      const data = await res.json();
-      console.log(`Streaming state for ${projectId}:`, data);
-
-      if (data.isStreaming && data.partial) {
-        // Restore streaming state
-        setStreamingProjectIds(prev => {
-          const next = new Set(prev);
-          next.add(projectId);
-          return next;
-        });
-
-        // Update refs with partial data
-        if (data.partial.thinking) {
-          thinkingRefs.current.set(projectId, data.partial.thinking);
-        }
-        if (data.partial.text) {
-          responseRefs.current.set(projectId, data.partial.text);
-        }
-        if (data.partial.activity && data.partial.activity.length > 0) {
-          activityRefs.current.set(projectId, data.partial.activity);
-        }
-
-        // Update project state with restored streaming data
-        updateProjectState(projectId, state => ({
-          ...state,
-          isStreaming: true,
-          currentThinking: data.partial.thinking || '',
-          currentResponse: data.partial.text || '',
-          currentActivity: data.partial.activity || [],
-        }));
-      }
-    } catch (err) {
-      console.error(`Failed to fetch streaming state for ${projectId}:`, err);
-    }
-  }, [updateProjectState]);
+  }, [serverFetch, updateProjectState]);
 
   const clearHistory = async () => {
     if (!activeProjectId) return;
     try {
-      const res = await apiFetch(`/api/projects/${encodeURIComponent(activeProjectId)}/conversation`, { method: 'DELETE' });
+      const res = await serverFetch(`/api/projects/${encodeURIComponent(activeProjectId)}/conversation`, { method: 'DELETE' });
       if (!res.ok) throw new Error(`Failed to clear history: ${res.status}`);
       updateProjectState(activeProjectId, state => ({ ...state, messages: [] }));
     } catch (err) {
@@ -338,13 +212,13 @@ export default function Chat({ token = null }: Props) {
     }
   };
 
-  // Scroll to bottom when new messages arrive or project changes (force scroll)
+  // Scroll to bottom when new messages arrive or project changes
   const messagesLength = messages.length;
   useEffect(() => {
     scrollToBottom(true);
   }, [messagesLength, activeProjectId, scrollToBottom]);
 
-  // Scroll during streaming — throttle to once per 200ms to avoid layout thrash
+  // Scroll during streaming
   const scrollThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (isStreaming && !scrollThrottleRef.current) {
@@ -355,7 +229,7 @@ export default function Chat({ token = null }: Props) {
     }
   }, [currentThinking, currentResponse, currentActivity, isStreaming, scrollToBottom]);
 
-  // Persist open tabs to localStorage (skip initial render to avoid nuking saved data)
+  // Persist open tabs to localStorage (server-scoped)
   const initialRenderRef = useRef(true);
   useEffect(() => {
     if (initialRenderRef.current) {
@@ -363,13 +237,13 @@ export default function Chat({ token = null }: Props) {
       return;
     }
     if (openProjects.length > 0) {
-      localStorage.setItem('claude-remote-open-projects', JSON.stringify(openProjects));
+      localStorage.setItem(projectsKey, JSON.stringify(openProjects));
     } else {
-      localStorage.removeItem('claude-remote-open-projects');
+      localStorage.removeItem(projectsKey);
     }
-  }, [openProjects]);
+  }, [openProjects, projectsKey]);
 
-  // Persist active tab to localStorage (skip initial render)
+  // Persist active tab to localStorage (server-scoped)
   const initialActiveRef = useRef(true);
   useEffect(() => {
     if (initialActiveRef.current) {
@@ -377,169 +251,67 @@ export default function Chat({ token = null }: Props) {
       return;
     }
     if (activeProjectId) {
-      localStorage.setItem('claude-remote-active-project', activeProjectId);
+      localStorage.setItem(activeProjectKey, activeProjectId);
     } else {
-      localStorage.removeItem('claude-remote-active-project');
+      localStorage.removeItem(activeProjectKey);
     }
-  }, [activeProjectId]);
+  }, [activeProjectId, activeProjectKey]);
 
   useEffect(() => {
-    console.log('Chat useEffect: token =', token);
-    if (token) {
-      console.log('New pairing flow - clearing old credentials');
-      localStorage.removeItem('claude-remote-paired');
-      localStorage.removeItem('claude-remote-device-id');
-      localStorage.removeItem('claude-remote-private-key');
-      localStorage.removeItem('claude-remote-server-public-key');
-      localStorage.removeItem('claude-remote-pin');
-      cachedPinRef.current = null;
-      // Stay in 'pairing' view, completePairing will run
-    } else {
-      const stored = localStorage.getItem('claude-remote-paired');
-      if (stored) {
-        // Check if we have a cached PIN — auto-connect if so
-        const cachedPin = cachedPinRef.current;
-        if (cachedPin) {
-          console.log('Found cached PIN, auto-connecting...');
+    const cachedPin = cachedPinRef.current;
+    if (cachedPin) {
+      console.log('Found cached PIN, auto-connecting...');
 
-          // Restore tabs from localStorage immediately (don't wait for auth_ok)
-          const savedProjects = localStorage.getItem('claude-remote-open-projects');
-          const savedActiveId = localStorage.getItem('claude-remote-active-project');
-          if (savedProjects) {
-            try {
-              const projects: Project[] = JSON.parse(savedProjects);
-              if (projects.length > 0) {
-                setOpenProjects(projects);
-                const newStates = new Map<string, ProjectState>();
-                projects.forEach(p => {
-                  newStates.set(p.id, createEmptyProjectState());
-                });
-                setProjectStates(newStates);
-                const activeId = savedActiveId && projects.find(p => p.id === savedActiveId)
-                  ? savedActiveId
-                  : projects[0].id;
-                setActiveProjectId(activeId);
-                tabsRestoredRef.current = true;
-              }
-            } catch (err) {
-              console.error('Failed to restore saved projects on init:', err);
-            }
+      // Restore tabs from localStorage
+      const savedProjects = localStorage.getItem(projectsKey);
+      const savedActiveId = localStorage.getItem(activeProjectKey);
+      if (savedProjects) {
+        try {
+          const projects: Project[] = JSON.parse(savedProjects);
+          if (projects.length > 0) {
+            setOpenProjects(projects);
+            const newStates = new Map<string, ProjectState>();
+            projects.forEach(p => {
+              newStates.set(p.id, createEmptyProjectState());
+            });
+            setProjectStates(newStates);
+            const activeId = savedActiveId && projects.find(p => p.id === savedActiveId)
+              ? savedActiveId
+              : projects[0].id;
+            setActiveProjectId(activeId);
+            tabsRestoredRef.current = true;
           }
-
-          setView('chat');
-          setIsReconnecting(true);
-          setTimeout(() => connectAndAuth(), 0);
-        } else {
-          console.log('Found pairing but no cached PIN, showing PIN view');
-          setView('pin');
+        } catch (err) {
+          console.error('Failed to restore saved projects on init:', err);
         }
-      } else {
-        setError('Not paired. Go to home page to scan QR code.');
       }
+
+      setView('chat');
+      setIsReconnecting(true);
+      setTimeout(() => connectAndAuth(), 0);
+    } else {
+      setView('pin');
     }
-  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const pairingStarted = useRef(false);
-
-  const completePairing = useCallback(async () => {
-    if (!token || pairingStarted.current) {
-      return;
-    }
-    pairingStarted.current = true;
-
-    console.log('Fetching server public key...');
-    const getRes = await fetch(`/pair/${token}`);
-    if (!getRes.ok) {
-      const data = await getRes.json().catch(() => ({}));
-      const msg = `Failed to get server key: ${data.error || getRes.status}`;
-      console.error(msg, data);
-      setError(msg);
-      throw new Error(msg);
-    }
-    const getData = await getRes.json();
-    const { serverPublicKey } = getData;
-    if (!serverPublicKey) {
-      const msg = 'Server returned empty public key';
-      console.error(msg, getData);
-      setError(msg);
-      throw new Error(msg);
-    }
-
-    const keyPair = await generateKeyPair();
-    const clientPublicKey = await exportPublicKey(keyPair.publicKey);
-    const privateKeyJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey);
-
-    const postRes = await fetch(`/pair/${token}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ clientPublicKey }),
-    });
-
-    if (!postRes.ok) {
-      const data = await postRes.json();
-      const msg = `Failed to complete pairing: ${data.error || postRes.status}`;
-      console.error(msg, data);
-      setError(msg);
-      throw new Error(msg);
-    }
-
-    const { deviceId } = await postRes.json();
-    if (!deviceId) {
-      const msg = 'Server returned empty device ID';
-      console.error(msg);
-      setError(msg);
-      throw new Error(msg);
-    }
-
-    const serverKey = await importPublicKey(serverPublicKey);
-    await deriveSharedSecret(keyPair.privateKey, serverKey); // Verify key derivation works
-
-    localStorage.setItem('claude-remote-paired', 'true');
-    localStorage.setItem('claude-remote-device-id', deviceId);
-    localStorage.setItem('claude-remote-private-key', JSON.stringify(privateKeyJwk));
-    localStorage.setItem('claude-remote-server-public-key', serverPublicKey);
-
-    // Hard redirect to avoid React strict mode issues
-    window.location.href = '/chat';
-  }, [token]);
-
-  useEffect(() => {
-    if (token && view === 'pairing') {
-      completePairing().catch((err) => {
-        console.error('Pairing failed:', err);
-        // Error already set in completePairing
-      });
-    }
-  }, [completePairing, token, view]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const restoreSharedKey = useCallback(async (): Promise<void> => {
-    const privateKeyJwk = localStorage.getItem('claude-remote-private-key');
-    const serverPublicKey = localStorage.getItem('claude-remote-server-public-key');
-
-    if (!privateKeyJwk) {
-      throw new Error('No private key in localStorage - device not paired');
-    }
-    if (!serverPublicKey) {
-      throw new Error('No server public key in localStorage - device not paired');
-    }
-
     const privateKey = await crypto.subtle.importKey(
       'jwk',
-      JSON.parse(privateKeyJwk),
+      JSON.parse(serverConfig.privateKey),
       { name: 'ECDH', namedCurve: 'P-256' },
       true,
       ['deriveBits']
     );
-    const serverKey = await importPublicKey(serverPublicKey);
+    const serverKey = await importPublicKey(serverConfig.serverPublicKey);
     const sharedKey = await deriveSharedSecret(privateKey, serverKey);
     sharedKeyRef.current = sharedKey;
-  }, []);
+  }, [serverConfig]);
 
-  // Schedule a reconnection attempt with exponential backoff
+  // Schedule reconnection with exponential backoff
   const scheduleReconnect = useCallback(() => {
     if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
     const attempt = reconnectAttemptRef.current;
-    const delay = Math.min(1000 * Math.pow(2, attempt), 30000); // 1s, 2s, 4s, ... 30s max
+    const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
     console.log(`[reconnect] Scheduling attempt ${attempt + 1} in ${delay}ms`);
     reconnectAttemptRef.current = attempt + 1;
     setReconnectAttempt(attempt + 1);
@@ -549,14 +321,15 @@ export default function Chat({ token = null }: Props) {
     }, delay);
   }, []); // connectAndAuth referenced below via ref
 
-  // Ref to break circular dependency between connectWebSocket and scheduleReconnect
   const scheduleReconnectRef = useRef(scheduleReconnect);
   scheduleReconnectRef.current = scheduleReconnect;
 
   const connectWebSocket = useCallback((): Promise<WebSocket> => {
     return new Promise((resolve, reject) => {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+      // Connect to the specific server's WebSocket
+      const wsUrl = new URL('/ws', serverConfig.serverUrl);
+      wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(wsUrl.toString());
 
       ws.onopen = () => {
         wsRef.current = ws;
@@ -595,7 +368,7 @@ export default function Chat({ token = null }: Props) {
           projectId?: string;
           activeProjectIds?: string[];
           activity?: ToolActivity[];
-          toolUse?: { tool: string; input: Record<string, unknown> };
+          toolUse?: { tool: string; id?: string; input: Record<string, unknown> };
           toolResult?: { tool: string; output?: string; error?: string };
         };
         try {
@@ -605,18 +378,15 @@ export default function Chat({ token = null }: Props) {
           return;
         }
 
-        // Get projectId from message (streaming events include it)
         const projectId = msg.projectId;
 
         if (msg.type === 'auth_ok') {
-          // Successful auth — clear reconnection state
           setError('');
           setView('chat');
           setIsReconnecting(false);
           setReconnectAttempt(0);
           reconnectAttemptRef.current = 0;
 
-          // Set streaming indicators for any active jobs
           const activeIds = msg.activeProjectIds || [];
           if (activeIds.length > 0) {
             console.log('Active streaming projects on reconnect:', activeIds);
@@ -631,11 +401,10 @@ export default function Chat({ token = null }: Props) {
             });
           }
 
-          // Restore tabs from localStorage, or show picker if none saved
           if (!tabsRestoredRef.current) {
             tabsRestoredRef.current = true;
-            const savedProjects = localStorage.getItem('claude-remote-open-projects');
-            const savedActiveId = localStorage.getItem('claude-remote-active-project');
+            const savedProjects = localStorage.getItem(projectsKey);
+            const savedActiveId = localStorage.getItem(activeProjectKey);
 
             if (savedProjects) {
               try {
@@ -666,8 +435,7 @@ export default function Chat({ token = null }: Props) {
             }
             setShowProjectPicker(true);
           } else {
-            // Tabs already restored (e.g. from cached PIN init) — just fetch conversations
-            const savedProjects = localStorage.getItem('claude-remote-open-projects');
+            const savedProjects = localStorage.getItem(projectsKey);
             if (savedProjects) {
               try {
                 const projects: Project[] = JSON.parse(savedProjects);
@@ -677,9 +445,8 @@ export default function Chat({ token = null }: Props) {
           }
         } else if (msg.type === 'auth_error') {
           console.error('Auth failed:', msg.error);
-          // PIN was wrong — clear cached PIN, drop to PIN screen
           cachedPinRef.current = null;
-          localStorage.removeItem('claude-remote-pin');
+          clearServerPin(serverConfig.id);
           setIsReconnecting(false);
           setReconnectAttempt(0);
           reconnectAttemptRef.current = 0;
@@ -692,15 +459,9 @@ export default function Chat({ token = null }: Props) {
             activity: msg.activity?.length || 0,
           });
 
-          if (msg.thinking) {
-            thinkingRefs.current.set(projectId, msg.thinking);
-          }
-          if (msg.text) {
-            responseRefs.current.set(projectId, msg.text);
-          }
-          if (msg.activity && msg.activity.length > 0) {
-            activityRefs.current.set(projectId, msg.activity);
-          }
+          if (msg.thinking) thinkingRefs.current.set(projectId, msg.thinking);
+          if (msg.text) responseRefs.current.set(projectId, msg.text);
+          if (msg.activity && msg.activity.length > 0) activityRefs.current.set(projectId, msg.activity);
 
           updateProjectState(projectId, state => ({
             ...state,
@@ -735,7 +496,6 @@ export default function Chat({ token = null }: Props) {
           const currentActivity = activityRefs.current.get(projectId) || [];
           activityRefs.current.set(projectId, [...currentActivity, activity]);
 
-          // Detect AskUserQuestion — store pending question for interactive UI
           if (msg.toolUse.tool === 'AskUserQuestion' && msg.toolUse.input?.questions) {
             updateProjectState(projectId, state => ({
               ...state,
@@ -821,7 +581,6 @@ export default function Chat({ token = null }: Props) {
             }));
           }
         } else if (msg.type === 'sync_user_message' && msg.projectId) {
-          // Another device sent a message — add it to our chat and start streaming UI
           console.log(`[sync] User message from another device for ${msg.projectId}`);
           updateProjectState(msg.projectId, state => ({
             ...state,
@@ -838,7 +597,6 @@ export default function Chat({ token = null }: Props) {
           responseRefs.current.set(msg.projectId, '');
           activityRefs.current.set(msg.projectId, []);
         } else if (msg.type === 'sync_cancel' && msg.projectId) {
-          // Another device cancelled — stop streaming UI
           console.log(`[sync] Cancel from another device for ${msg.projectId}`);
           setStreamingProjectIds(prev => {
             const next = new Set(prev);
@@ -858,19 +616,15 @@ export default function Chat({ token = null }: Props) {
         console.log(`[ws] Closed: code=${event.code} reason="${event.reason || 'none'}"`);
         wsRef.current = null;
 
-        // Don't reconnect if we closed intentionally
         if (intentionalCloseRef.current) {
           intentionalCloseRef.current = false;
           return;
         }
 
         if (event.code !== 1000) {
-          // Unexpected close — try to auto-reconnect if we have a cached PIN
           if (cachedPinRef.current) {
-            // DON'T clear streaming state — server keeps jobs running, we'll restore on reconnect
             scheduleReconnectRef.current();
           } else {
-            // No cached PIN — must go to PIN screen
             setError('Connection lost. Please re-enter PIN.');
             setView('pin');
           }
@@ -878,14 +632,13 @@ export default function Chat({ token = null }: Props) {
       };
 
       ws.onerror = (event) => {
-        // Just log — onclose will fire after this and handle reconnection
         console.error('[ws] Connection error', event);
         reject(new Error('WebSocket connection failed'));
       };
     });
-  }, [updateProjectState]);
+  }, [serverConfig, updateProjectState, projectsKey, activeProjectKey, fetchProjectConversation]);
 
-  // Connect + authenticate in one shot (used by reconnect loop and auto-login)
+  // Connect + authenticate
   const connectAndAuth = useCallback(async () => {
     const pinToUse = cachedPinRef.current;
     if (!pinToUse) {
@@ -896,7 +649,6 @@ export default function Chat({ token = null }: Props) {
       return;
     }
 
-    // Ensure shared key is ready
     if (!sharedKeyRef.current) {
       try {
         await restoreSharedKey();
@@ -912,11 +664,9 @@ export default function Chat({ token = null }: Props) {
     try {
       await connectWebSocket();
     } catch {
-      // onclose handler will schedule next reconnect
       return;
     }
 
-    // Send auth
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && sharedKeyRef.current) {
       try {
         const encrypted = await encrypt(
@@ -927,7 +677,6 @@ export default function Chat({ token = null }: Props) {
         console.log('[reconnect] Auth sent');
       } catch (err) {
         console.error('[reconnect] Failed to send auth:', err);
-        // Will get closed, onclose will retry
       }
     }
   }, [connectWebSocket, restoreSharedKey]);
@@ -939,7 +688,7 @@ export default function Chat({ token = null }: Props) {
     };
   }, []);
 
-  // Auto-dismiss errors after 8 seconds (unless it's a pairing/key error that needs action)
+  // Auto-dismiss errors after 8 seconds
   useEffect(() => {
     if (!error) return;
     const timer = setTimeout(() => setError(''), 8000);
@@ -954,9 +703,8 @@ export default function Chat({ token = null }: Props) {
       return;
     }
 
-    // Cache the PIN for auto-reconnect
     cachedPinRef.current = pin;
-    localStorage.setItem('claude-remote-pin', JSON.stringify({ pin, exp: Date.now() + 24 * 60 * 60 * 1000 }));
+    setServerPin(serverConfig.id, pin);
 
     setError('');
     await connectAndAuth();
@@ -1024,7 +772,6 @@ export default function Chat({ token = null }: Props) {
   const handleCancel = useCallback(async () => {
     if (!activeProjectId) return;
 
-    // Optimistic UI update
     setStreamingProjectIds(prev => {
       const next = new Set(prev);
       next.delete(activeProjectId);
@@ -1035,7 +782,6 @@ export default function Chat({ token = null }: Props) {
       isStreaming: false,
     }));
 
-    // Try WebSocket cancel
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && sharedKeyRef.current) {
       try {
         const encrypted = await encrypt(
@@ -1048,10 +794,9 @@ export default function Chat({ token = null }: Props) {
       }
     }
 
-    // Also fire HTTP cancel as fallback (fire and forget)
-    apiFetch(`/api/projects/${encodeURIComponent(activeProjectId)}/cancel`, { method: 'POST' })
+    serverFetch(`/api/projects/${encodeURIComponent(activeProjectId)}/cancel`, { method: 'POST' })
       .catch(err => console.error('[cancel] HTTP cancel failed:', err));
-  }, [activeProjectId, updateProjectState]);
+  }, [activeProjectId, updateProjectState, serverFetch]);
 
   const handleToolAnswer = useCallback(async (answers: Array<{ header: string; answer: string }>) => {
     if (!activeProjectId || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !sharedKeyRef.current) {
@@ -1090,14 +835,11 @@ export default function Chat({ token = null }: Props) {
     updateProjectState(activeProjectId, state => ({ ...state, pendingQuestion: null }));
   }, [activeProjectId, updateProjectState]);
 
-  // Handle project selection from picker
   const handleSelectProject = (project: Project) => {
     console.log('Selected project:', project.id);
 
-    // Add to open projects if not already open
     if (!openProjects.find(p => p.id === project.id)) {
       setOpenProjects(prev => [...prev, project]);
-      // Initialize empty state for new project
       if (!projectStates.has(project.id)) {
         setProjectStates(prev => {
           const next = new Map(prev);
@@ -1105,26 +847,21 @@ export default function Chat({ token = null }: Props) {
           return next;
         });
       }
-      // Fetch conversation history for this project
       fetchProjectConversation(project.id);
     }
 
-    // Set as active
     setActiveProjectId(project.id);
     setShowProjectPicker(false);
   };
 
-  // Handle closing a project tab
   const handleCloseProject = (projectId: string) => {
     setOpenProjects(prev => prev.filter(p => p.id !== projectId));
 
-    // If closing the active project, switch to another or null
     if (activeProjectId === projectId) {
       const remaining = openProjects.filter(p => p.id !== projectId);
       setActiveProjectId(remaining.length > 0 ? remaining[remaining.length - 1].id : null);
     }
 
-    // Clear project state
     setProjectStates(prev => {
       const next = new Map(prev);
       next.delete(projectId);
@@ -1132,7 +869,6 @@ export default function Chat({ token = null }: Props) {
     });
   };
 
-  // Reset stuck state for current project
   const handleReset = () => {
     setError('');
     if (activeProjectId) {
@@ -1154,31 +890,18 @@ export default function Chat({ token = null }: Props) {
     console.log('State reset by user');
   };
 
-  if (view === 'pairing') {
-    return (
-      <main className="min-h-screen flex flex-col items-center justify-center bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] p-4">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold mb-4">{error ? 'Error' : 'Pairing...'}</h1>
-          {error ? (
-            <>
-              <p className="text-red-400 mb-4">{error}</p>
-              <a href="/" className="px-6 py-3 bg-[var(--color-accent)] rounded-lg font-semibold hover:bg-[var(--color-accent-hover)] transition-colors inline-block">
-                Go to Home
-              </a>
-            </>
-          ) : (
-            <p className="text-[var(--color-text-secondary)]">Establishing secure connection</p>
-          )}
-        </div>
-      </main>
-    );
-  }
-
   if (view === 'pin') {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] p-4">
         <div className="w-full max-w-xs">
-          <h1 className="text-2xl font-bold mb-2 text-center">Enter PIN</h1>
+          <button
+            onClick={() => onNavigate('servers')}
+            className="mb-4 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+          >
+            &larr; Servers
+          </button>
+          <h1 className="text-2xl font-bold mb-1 text-center">Enter PIN</h1>
+          <p className="text-sm text-[var(--color-text-secondary)] mb-4 text-center truncate">{serverConfig.name}</p>
           {error && <p className="text-red-400 text-sm mb-4 text-center">{error}</p>}
           <form onSubmit={handlePinSubmit}>
             <input
@@ -1218,12 +941,23 @@ export default function Chat({ token = null }: Props) {
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-primary)] sticky top-0 z-10">
         <div className="flex items-center gap-3 min-w-0 flex-1">
+          <button
+            onClick={() => onNavigate('servers')}
+            className="shrink-0 text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-accent)] transition-colors bg-[var(--color-bg-secondary)] px-2 py-1 rounded"
+            title="Switch server"
+          >
+            {serverConfig.name}
+          </button>
           <h1 className="text-lg font-semibold truncate">
             {activeProjectId
               ? openProjects.find(p => p.id === activeProjectId)?.name || activeProjectId
               : 'Select a project'}
           </h1>
-          <GitStatus projectId={activeProjectId} />
+          <GitStatus
+            projectId={activeProjectId}
+            serverId={serverConfig.id}
+            serverUrl={serverConfig.serverUrl}
+          />
         </div>
         <div className="flex gap-2 shrink-0">
           <button
@@ -1267,7 +1001,7 @@ export default function Chat({ token = null }: Props) {
               setReconnectAttempt(0);
               reconnectAttemptRef.current = 0;
               cachedPinRef.current = null;
-              localStorage.removeItem('claude-remote-pin');
+              clearServerPin(serverConfig.id);
               setView('pin');
             }}
             className="ml-2 px-2 py-0.5 text-xs bg-yellow-800 hover:bg-yellow-700 rounded transition-colors"
@@ -1283,6 +1017,8 @@ export default function Chat({ token = null }: Props) {
         onClose={() => setShowProjectPicker(false)}
         onSelect={handleSelectProject}
         openProjectIds={openProjectIds}
+        serverId={serverConfig.id}
+        serverUrl={serverConfig.serverUrl}
       />
 
       {/* Messages */}
@@ -1307,7 +1043,6 @@ export default function Chat({ token = null }: Props) {
             {messages.map((msg, i) => (
               <div key={i}>
                 {msg.role === 'user' ? (
-                  // User message - compact bubble on the right
                   <div className="flex justify-end">
                     <div className="max-w-[90%] sm:max-w-[85%]">
                       <div className="rounded-2xl px-4 py-3 bg-[var(--color-accent)]">
@@ -1316,7 +1051,6 @@ export default function Chat({ token = null }: Props) {
                     </div>
                   </div>
                 ) : (
-                  // Assistant message - full width response card
                   <StreamingResponse
                     thinking={msg.thinking}
                     activity={msg.activity}
@@ -1329,7 +1063,6 @@ export default function Chat({ token = null }: Props) {
               </div>
             ))}
 
-            {/* Streaming response */}
             {isStreaming && (
               <StreamingResponse
                 thinking={currentThinking}
@@ -1381,6 +1114,7 @@ export default function Chat({ token = null }: Props) {
           isStreaming={isStreaming}
           onSend={handleSend}
           onCancel={handleCancel}
+          serverId={serverConfig.id}
         />
       </div>
     </main>

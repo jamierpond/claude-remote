@@ -1,13 +1,21 @@
 /**
  * Authenticated fetch wrapper for API calls.
- * Reads the PIN from localStorage and adds Authorization: Bearer <pin> header.
+ * Supports multi-server: pass serverId + serverUrl for cross-origin requests.
  */
-export function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const headers = new Headers(init?.headers);
 
-  // Read PIN from localStorage (same format as Chat.tsx uses)
+export interface ApiOptions extends RequestInit {
+  serverId?: string;
+  serverUrl?: string;
+}
+
+export function apiFetch(input: RequestInfo | URL, init?: ApiOptions): Promise<Response> {
+  const headers = new Headers(init?.headers);
+  const serverId = init?.serverId;
+
+  // Read PIN for this specific server (or legacy key)
   try {
-    const stored = localStorage.getItem('claude-remote-pin');
+    const pinKey = serverId ? `claude-remote-pin-${serverId}` : 'claude-remote-pin';
+    const stored = localStorage.getItem(pinKey);
     if (stored) {
       const { pin, exp } = JSON.parse(stored);
       if (Date.now() <= exp && pin) {
@@ -15,8 +23,16 @@ export function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<
       }
     }
   } catch {
-    // If localStorage read fails, proceed without auth
+    // proceed without auth
   }
 
-  return fetch(input, { ...init, headers });
+  // Prefix with serverUrl for cross-origin requests
+  let url = input;
+  if (init?.serverUrl && typeof input === 'string' && input.startsWith('/')) {
+    url = `${init.serverUrl}${input}`;
+  }
+
+  // Strip custom keys before passing to fetch
+  const { serverId: _s, serverUrl: _u, ...fetchInit } = init || {};
+  return fetch(url, { ...fetchInit, headers });
 }
