@@ -11,14 +11,14 @@ export interface EncryptedData {
 
 export async function generateKeyPair(): Promise<CryptoKeyPair> {
   return crypto.subtle.generateKey(
-    { name: 'ECDH', namedCurve: 'P-256' },
+    { name: "ECDH", namedCurve: "P-256" },
     true,
-    ['deriveBits']
+    ["deriveBits"],
   );
 }
 
 export async function exportPublicKey(key: CryptoKey): Promise<string> {
-  const raw = await crypto.subtle.exportKey('raw', key);
+  const raw = await crypto.subtle.exportKey("raw", key);
   return btoa(String.fromCharCode(...new Uint8Array(raw)));
 }
 
@@ -29,37 +29,43 @@ export async function importPublicKey(base64: string): Promise<CryptoKey> {
     bytes[i] = binary.charCodeAt(i);
   }
   return crypto.subtle.importKey(
-    'raw',
+    "raw",
     bytes,
-    { name: 'ECDH', namedCurve: 'P-256' },
+    { name: "ECDH", namedCurve: "P-256" },
     true,
-    []
+    [],
   );
 }
 
-export async function deriveSharedSecret(privateKey: CryptoKey, peerPublicKey: CryptoKey): Promise<CryptoKey> {
+export async function deriveSharedSecret(
+  privateKey: CryptoKey,
+  peerPublicKey: CryptoKey,
+): Promise<CryptoKey> {
   const bits = await crypto.subtle.deriveBits(
-    { name: 'ECDH', public: peerPublicKey },
+    { name: "ECDH", public: peerPublicKey },
     privateKey,
-    256
+    256,
   );
-  const hashed = await crypto.subtle.digest('SHA-256', bits);
+  const hashed = await crypto.subtle.digest("SHA-256", bits);
   return crypto.subtle.importKey(
-    'raw',
+    "raw",
     hashed,
-    { name: 'AES-GCM', length: 256 },
+    { name: "AES-GCM", length: 256 },
     false,
-    ['encrypt', 'decrypt']
+    ["encrypt", "decrypt"],
   );
 }
 
-export async function encrypt(plaintext: string, key: CryptoKey): Promise<EncryptedData> {
+export async function encrypt(
+  plaintext: string,
+  key: CryptoKey,
+): Promise<EncryptedData> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const encoded = new TextEncoder().encode(plaintext);
   const encrypted = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
+    { name: "AES-GCM", iv },
     key,
-    encoded
+    encoded,
   );
   const ct = new Uint8Array(encrypted.slice(0, -16));
   const tag = new Uint8Array(encrypted.slice(-16));
@@ -70,17 +76,20 @@ export async function encrypt(plaintext: string, key: CryptoKey): Promise<Encryp
   };
 }
 
-export async function decrypt(data: EncryptedData, key: CryptoKey): Promise<string> {
-  const iv = Uint8Array.from(atob(data.iv), c => c.charCodeAt(0));
-  const ct = Uint8Array.from(atob(data.ct), c => c.charCodeAt(0));
-  const tag = Uint8Array.from(atob(data.tag), c => c.charCodeAt(0));
+export async function decrypt(
+  data: EncryptedData,
+  key: CryptoKey,
+): Promise<string> {
+  const iv = Uint8Array.from(atob(data.iv), (c) => c.charCodeAt(0));
+  const ct = Uint8Array.from(atob(data.ct), (c) => c.charCodeAt(0));
+  const tag = Uint8Array.from(atob(data.tag), (c) => c.charCodeAt(0));
   const combined = new Uint8Array(ct.length + tag.length);
   combined.set(ct);
   combined.set(tag, ct.length);
   const decrypted = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv },
+    { name: "AES-GCM", iv },
     key,
-    combined
+    combined,
   );
   return new TextDecoder().decode(decrypted);
 }

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, memo } from 'react';
+import { useState, useRef, useCallback, memo } from "react";
 
 interface ChatInputProps {
   isStreaming: boolean;
@@ -7,25 +7,37 @@ interface ChatInputProps {
   serverId?: string;
 }
 
-export default memo(function ChatInput({ isStreaming, onSend, onCancel, serverId }: ChatInputProps) {
-  const draftKey = serverId ? `claude-remote-draft-${serverId}` : 'claude-remote-draft';
-  const [input, setInputRaw] = useState(() => localStorage.getItem(draftKey) || '');
+export default memo(function ChatInput({
+  isStreaming,
+  onSend,
+  onCancel,
+  serverId,
+}: ChatInputProps) {
+  const draftKey = serverId
+    ? `claude-remote-draft-${serverId}`
+    : "claude-remote-draft";
+  const [input, setInputRaw] = useState(
+    () => localStorage.getItem(draftKey) || "",
+  );
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const setInput = useCallback((v: string) => {
-    setInputRaw(v);
-    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
-    draftTimerRef.current = setTimeout(() => {
-      if (v) localStorage.setItem(draftKey, v);
-      else localStorage.removeItem(draftKey);
-    }, 500);
-  }, [draftKey]);
+  const setInput = useCallback(
+    (v: string) => {
+      setInputRaw(v);
+      if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+      draftTimerRef.current = setTimeout(() => {
+        if (v) localStorage.setItem(draftKey, v);
+        else localStorage.removeItem(draftKey);
+      }, 500);
+    },
+    [draftKey],
+  );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isStreaming) return;
     const text = input.trim();
-    setInput('');
+    setInput("");
     onSend(text);
   };
 
@@ -45,8 +57,17 @@ export default memo(function ChatInput({ isStreaming, onSend, onCancel, serverId
           className="min-w-[44px] min-h-[44px] flex items-center justify-center bg-red-600 rounded-full font-semibold hover:bg-red-700 active:bg-red-800 transition-colors"
           aria-label="Cancel"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clipRule="evenodd" />
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-5 w-5"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+          >
+            <path
+              fillRule="evenodd"
+              d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z"
+              clipRule="evenodd"
+            />
           </svg>
         </button>
       ) : (
@@ -56,11 +77,16 @@ export default memo(function ChatInput({ isStreaming, onSend, onCancel, serverId
           className="min-w-[44px] min-h-[44px] flex items-center justify-center bg-[var(--color-accent)] rounded-full font-semibold hover:bg-[var(--color-accent-hover)] active:bg-[#a04e30] transition-colors disabled:opacity-50 disabled:hover:bg-[var(--color-accent)]"
           aria-label="Send"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-5 w-5"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+          >
             <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
           </svg>
         </button>
       )}
     </form>
   );
-})
+});
