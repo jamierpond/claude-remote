@@ -8,13 +8,13 @@ export interface ServerConfig {
   name: string;
   serverUrl: string;
   deviceId: string;
-  privateKey: string;      // JWK JSON string
-  serverPublicKey: string;  // base64
+  privateKey: string; // JWK JSON string
+  serverPublicKey: string; // base64
   pairedAt: string;
 }
 
-const SERVERS_KEY = 'claude-remote-servers';
-const ACTIVE_KEY = 'claude-remote-active-server-id';
+const SERVERS_KEY = "claude-remote-servers";
+const ACTIVE_KEY = "claude-remote-active-server-id";
 
 export function getServers(): ServerConfig[] {
   try {
@@ -36,7 +36,7 @@ export function addServer(config: ServerConfig): void {
 }
 
 export function removeServer(serverId: string): void {
-  const servers = getServers().filter(s => s.id !== serverId);
+  const servers = getServers().filter((s) => s.id !== serverId);
   saveServers(servers);
   // Clean up per-server keys
   localStorage.removeItem(`claude-remote-pin-${serverId}`);
@@ -60,10 +60,12 @@ export function setActiveServerId(id: string): void {
 export function getActiveServer(): ServerConfig | null {
   const id = getActiveServerId();
   if (!id) return null;
-  return getServers().find(s => s.id === id) || null;
+  return getServers().find((s) => s.id === id) || null;
 }
 
-export function getServerPin(serverId: string): { pin: string; exp: number } | null {
+export function getServerPin(
+  serverId: string,
+): { pin: string; exp: number } | null {
   try {
     const stored = localStorage.getItem(`claude-remote-pin-${serverId}`);
     if (!stored) return null;
@@ -78,8 +80,15 @@ export function getServerPin(serverId: string): { pin: string; exp: number } | n
   }
 }
 
-export function setServerPin(serverId: string, pin: string, ttlMs = 24 * 60 * 60 * 1000): void {
-  localStorage.setItem(`claude-remote-pin-${serverId}`, JSON.stringify({ pin, exp: Date.now() + ttlMs }));
+export function setServerPin(
+  serverId: string,
+  pin: string,
+  ttlMs = 24 * 60 * 60 * 1000,
+): void {
+  localStorage.setItem(
+    `claude-remote-pin-${serverId}`,
+    JSON.stringify({ pin, exp: Date.now() + ttlMs }),
+  );
 }
 
 export function clearServerPin(serverId: string): void {
@@ -94,12 +103,15 @@ export function migrateFromLegacy(): ServerConfig | null {
   // Already migrated?
   if (localStorage.getItem(SERVERS_KEY)) return null;
   // No legacy data?
-  if (!localStorage.getItem('claude-remote-paired')) return null;
+  if (!localStorage.getItem("claude-remote-paired")) return null;
 
-  const deviceId = localStorage.getItem('claude-remote-device-id');
-  const privateKey = localStorage.getItem('claude-remote-private-key');
-  const serverPublicKey = localStorage.getItem('claude-remote-server-public-key');
-  const serverUrl = localStorage.getItem('claude-remote-server-url') || window.location.origin;
+  const deviceId = localStorage.getItem("claude-remote-device-id");
+  const privateKey = localStorage.getItem("claude-remote-private-key");
+  const serverPublicKey = localStorage.getItem(
+    "claude-remote-server-public-key",
+  );
+  const serverUrl =
+    localStorage.getItem("claude-remote-server-url") || window.location.origin;
 
   if (!deviceId || !privateKey || !serverPublicKey) return null;
 
@@ -108,7 +120,7 @@ export function migrateFromLegacy(): ServerConfig | null {
   try {
     name = new URL(serverUrl).hostname;
   } catch {
-    name = 'Server';
+    name = "Server";
   }
 
   const config: ServerConfig = {
@@ -126,38 +138,38 @@ export function migrateFromLegacy(): ServerConfig | null {
   setActiveServerId(id);
 
   // Migrate PIN
-  const legacyPin = localStorage.getItem('claude-remote-pin');
+  const legacyPin = localStorage.getItem("claude-remote-pin");
   if (legacyPin) {
     localStorage.setItem(`claude-remote-pin-${id}`, legacyPin);
   }
 
   // Migrate project tabs
-  const legacyProjects = localStorage.getItem('claude-remote-open-projects');
+  const legacyProjects = localStorage.getItem("claude-remote-open-projects");
   if (legacyProjects) {
     localStorage.setItem(`claude-remote-projects-${id}`, legacyProjects);
   }
-  const legacyActive = localStorage.getItem('claude-remote-active-project');
+  const legacyActive = localStorage.getItem("claude-remote-active-project");
   if (legacyActive) {
     localStorage.setItem(`claude-remote-active-project-${id}`, legacyActive);
   }
 
   // Migrate draft
-  const legacyDraft = localStorage.getItem('claude-remote-draft');
+  const legacyDraft = localStorage.getItem("claude-remote-draft");
   if (legacyDraft) {
     localStorage.setItem(`claude-remote-draft-${id}`, legacyDraft);
   }
 
   // Clean up legacy keys
-  localStorage.removeItem('claude-remote-paired');
-  localStorage.removeItem('claude-remote-device-id');
-  localStorage.removeItem('claude-remote-private-key');
-  localStorage.removeItem('claude-remote-server-public-key');
-  localStorage.removeItem('claude-remote-shared-secret');
-  localStorage.removeItem('claude-remote-server-url');
-  localStorage.removeItem('claude-remote-pin');
-  localStorage.removeItem('claude-remote-open-projects');
-  localStorage.removeItem('claude-remote-active-project');
-  localStorage.removeItem('claude-remote-draft');
+  localStorage.removeItem("claude-remote-paired");
+  localStorage.removeItem("claude-remote-device-id");
+  localStorage.removeItem("claude-remote-private-key");
+  localStorage.removeItem("claude-remote-server-public-key");
+  localStorage.removeItem("claude-remote-shared-secret");
+  localStorage.removeItem("claude-remote-server-url");
+  localStorage.removeItem("claude-remote-pin");
+  localStorage.removeItem("claude-remote-open-projects");
+  localStorage.removeItem("claude-remote-active-project");
+  localStorage.removeItem("claude-remote-draft");
 
   return config;
 }

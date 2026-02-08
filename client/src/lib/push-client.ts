@@ -1,31 +1,35 @@
-import { apiFetch } from './api';
+import { apiFetch } from "./api";
 
 let swRegistration: ServiceWorkerRegistration | null = null;
 
 export async function registerServiceWorker(): Promise<ServiceWorkerRegistration | null> {
-  if (!('serviceWorker' in navigator)) {
-    console.log('[push] Service workers not supported');
+  if (!("serviceWorker" in navigator)) {
+    console.log("[push] Service workers not supported");
     return null;
   }
 
   try {
-    swRegistration = await navigator.serviceWorker.register('/sw.js');
-    console.log('[push] Service worker registered');
+    swRegistration = await navigator.serviceWorker.register("/sw.js");
+    console.log("[push] Service worker registered");
     return swRegistration;
   } catch (err) {
-    console.error('[push] Service worker registration failed:', err);
+    console.error("[push] Service worker registration failed:", err);
     return null;
   }
 }
 
 /** Check if push is supported and we can ask for permission */
 export function isPushSupported(): boolean {
-  return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  return (
+    "serviceWorker" in navigator &&
+    "PushManager" in window &&
+    "Notification" in window
+  );
 }
 
 /** Check current notification permission state */
-export function getPushPermission(): NotificationPermission | 'unsupported' {
-  if (!('Notification' in window)) return 'unsupported';
+export function getPushPermission(): NotificationPermission | "unsupported" {
+  if (!("Notification" in window)) return "unsupported";
   return Notification.permission;
 }
 
@@ -41,39 +45,41 @@ export async function subscribeToPush(
   requestPermission = false,
 ): Promise<boolean> {
   if (!swRegistration) {
-    console.log('[push] No service worker registration');
+    console.log("[push] No service worker registration");
     return false;
   }
 
-  if (!('PushManager' in window)) {
-    console.log('[push] Push not supported');
+  if (!("PushManager" in window)) {
+    console.log("[push] Push not supported");
     return false;
   }
 
   try {
     // Check permission state
-    if (Notification.permission === 'denied') {
-      console.log('[push] Notification permission denied');
+    if (Notification.permission === "denied") {
+      console.log("[push] Notification permission denied");
       return false;
     }
 
-    if (Notification.permission !== 'granted') {
+    if (Notification.permission !== "granted") {
       if (!requestPermission) {
-        console.log('[push] Permission not granted yet, waiting for user gesture');
+        console.log(
+          "[push] Permission not granted yet, waiting for user gesture",
+        );
         return false;
       }
       // This must be called from a user gesture on iOS
       const permission = await Notification.requestPermission();
-      if (permission !== 'granted') {
-        console.log('[push] Notification permission denied by user');
+      if (permission !== "granted") {
+        console.log("[push] Notification permission denied by user");
         return false;
       }
     }
 
     // Get VAPID public key from server
-    const vapidRes = await apiFetch('/api/push/vapid', { serverId, serverUrl });
+    const vapidRes = await apiFetch("/api/push/vapid", { serverId, serverUrl });
     if (!vapidRes.ok) {
-      console.error('[push] Failed to get VAPID key:', vapidRes.status);
+      console.error("[push] Failed to get VAPID key:", vapidRes.status);
       return false;
     }
     const { publicKey } = await vapidRes.json();
@@ -92,30 +98,30 @@ export async function subscribeToPush(
     }
 
     // Send subscription to server
-    const res = await apiFetch('/api/push/subscribe', {
+    const res = await apiFetch("/api/push/subscribe", {
       serverId,
       serverUrl,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ subscription: subscription.toJSON(), deviceId }),
     });
 
     if (!res.ok) {
-      console.error('[push] Failed to save subscription:', res.status);
+      console.error("[push] Failed to save subscription:", res.status);
       return false;
     }
 
-    console.log('[push] Push subscription active');
+    console.log("[push] Push subscription active");
     return true;
   } catch (err) {
-    console.error('[push] Subscribe failed:', err);
+    console.error("[push] Subscribe failed:", err);
     return false;
   }
 }
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
-  const padding = '='.repeat((4 - base64String.length % 4) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
   const rawData = window.atob(base64);
   const outputArray = new Uint8Array(rawData.length);
   for (let i = 0; i < rawData.length; ++i) {

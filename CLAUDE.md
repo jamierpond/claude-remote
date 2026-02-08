@@ -7,6 +7,7 @@ The user is controlling you remotely from their phone via this app. They cannot 
 **If you fail to restart the server after making changes, the user loses all access to you.** This is not a minor inconvenience — it is a total loss of control. You will be unreachable until someone physically accesses the machine.
 
 ### Deployment Rules (NON-NEGOTIABLE)
+
 - **ALWAYS use `make deploy`** to build + restart. This builds the client, restarts the systemd service, and verifies it came back up.
 - **NEVER kill server processes directly** — you are running inside the server as a subprocess. Killing the server kills you.
 - **NEVER skip the build step** — if the client doesn't build, the frontend will be broken and the user will see a blank page from their phone.
@@ -15,16 +16,19 @@ The user is controlling you remotely from their phone via this app. They cannot 
 - `make restart` for daemon-only restart (no rebuild).
 
 ### After ANY Code Change
+
 1. Run `pnpm build` — if it fails, STOP and fix the error
 2. Run `make deploy` — if it fails, STOP and investigate
 3. The user will reconnect automatically once the server is back up
 
 ## Overview
+
 Mobile chat interface for local Claude CLI with E2E encryption. Personal use — access Claude from phone via Cloudflare tunnel.
 
 ## Architecture
 
 ### Tech Stack
+
 - **Vite + React** client app
 - **Custom Node server** (`server.ts`) with WebSocket support
 - **Tailwind CSS** for styling (CSS variables in `client/src/index.css`)
@@ -32,10 +36,12 @@ Mobile chat interface for local Claude CLI with E2E encryption. Personal use —
 - **ws** for WebSocket server
 
 ### URL Mapping (Production)
+
 - `ai.pond.audio` = web client (served static files)
 - `ai-server.pond.audio` = API server (WebSocket, REST)
 
 ### Directory Structure
+
 ```
 ├── server.ts              # HTTP + WebSocket server, port 6767
 ├── src/lib/
@@ -52,6 +58,7 @@ Mobile chat interface for local Claude CLI with E2E encryption. Personal use —
 ```
 
 ### Security Model
+
 - E2E encryption: ECDH key exchange, AES-256-GCM per message
 - PIN auth: argon2-hashed, rate limited (5 attempts/min/IP)
 - All `/api/` routes require Bearer PIN (except limited `/api/status`)
@@ -62,6 +69,7 @@ Mobile chat interface for local Claude CLI with E2E encryption. Personal use —
 ## Development Principles
 
 ### Error Handling: SEEK ERRORS, DON'T HIDE THEM
+
 - **Always show errors to the user** — silent failures waste hours of debugging
 - When implementing any flow (pairing, auth, network calls, crypto):
   1. Wrap each step in try-catch
@@ -72,6 +80,7 @@ Mobile chat interface for local Claude CLI with E2E encryption. Personal use —
 - **Verbose by default** — it's easier to remove logs than to add them when debugging
 
 ### UI: NO PLACEHOLDER/INOP ELEMENTS
+
 - Never add UI elements (buttons, icons, etc.) that don't work yet
 - No "TODO: implement" buttons — either implement it fully or don't add it
 - Confusing inop UI is worse than no UI
@@ -79,6 +88,7 @@ Mobile chat interface for local Claude CLI with E2E encryption. Personal use —
 ## Key Libraries
 
 ### `src/lib/crypto.ts`
+
 - `generateKeyPair()` — ECDH P-256
 - `deriveSharedSecret(privateKey, peerPublicKey)` — ECDH derive
 - `encrypt(plaintext, secret)` — AES-256-GCM, returns {iv, ct, tag}
@@ -86,12 +96,14 @@ Mobile chat interface for local Claude CLI with E2E encryption. Personal use —
 - Key serialization helpers (base64 <-> Buffer)
 
 ### `src/lib/store.ts`
+
 - Config dir: `~/.config/claude-remote/`
 - `loadDevice()` / `saveDevice()` — device.json
 - `loadConfig()` / `saveConfig()` — config.json (PIN hash)
 - `hashPin(pin)` / `verifyPin(pin, hash)` — argon2
 
 ### `src/lib/claude.ts`
+
 - `spawnClaude(message, onEvent, signal)` — spawn CLI with streaming
 - Parse JSON stream events: content_block_start, content_block_delta
 - Map to simplified events: {type: 'thinking'|'text', text, done}
@@ -126,6 +138,7 @@ All dev commands tee output to log files in `logs/`:
 - `pnpm start` → `logs/server.log`
 
 Tail logs with:
+
 - `pnpm logs:server`
 - `pnpm logs:client`
 

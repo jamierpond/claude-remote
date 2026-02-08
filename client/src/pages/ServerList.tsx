@@ -1,9 +1,20 @@
-import { useState, useEffect, useRef } from 'react';
-import { type ServerConfig, getServers, addServer, removeServer, setActiveServerId } from '../lib/servers';
-import { generateKeyPair, exportPublicKey, importPublicKey, deriveSharedSecret } from '../lib/crypto-client';
+import { useState, useEffect, useRef } from "react";
+import {
+  type ServerConfig,
+  getServers,
+  addServer,
+  removeServer,
+  setActiveServerId,
+} from "../lib/servers";
+import {
+  generateKeyPair,
+  exportPublicKey,
+  importPublicKey,
+  deriveSharedSecret,
+} from "../lib/crypto-client";
 
 interface Props {
-  onNavigate: (route: 'servers' | 'chat') => void;
+  onNavigate: (route: "servers" | "chat") => void;
   pairInfo?: { serverUrl: string; token: string } | null;
 }
 
@@ -14,12 +25,14 @@ interface ServerStatus {
 
 export default function ServerList({ onNavigate, pairInfo }: Props) {
   const [servers, setServers] = useState<ServerConfig[]>(getServers);
-  const [statuses, setStatuses] = useState<Map<string, ServerStatus>>(new Map());
+  const [statuses, setStatuses] = useState<Map<string, ServerStatus>>(
+    new Map(),
+  );
   const [error, setError] = useState<string | null>(null);
 
   // Pairing state
   const [showPairing, setShowPairing] = useState(false);
-  const [pairingUrl, setPairingUrl] = useState('');
+  const [pairingUrl, setPairingUrl] = useState("");
   const [isPairing, setIsPairing] = useState(false);
   const [pairingLog, setPairingLog] = useState<string[]>([]);
   const autoPairingStarted = useRef(false);
@@ -29,7 +42,7 @@ export default function ServerList({ onNavigate, pairInfo }: Props) {
 
   const addLog = (msg: string) => {
     console.log(msg);
-    setPairingLog(prev => [...prev, msg]);
+    setPairingLog((prev) => [...prev, msg]);
   };
 
   // Check server statuses on mount
@@ -38,16 +51,25 @@ export default function ServerList({ onNavigate, pairInfo }: Props) {
       try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 5000);
-        const res = await fetch(`${server.serverUrl}/api/status`, { signal: controller.signal });
+        const res = await fetch(`${server.serverUrl}/api/status`, {
+          signal: controller.signal,
+        });
         clearTimeout(timeout);
         if (res.ok) {
           const data = await res.json();
-          setStatuses(prev => new Map(prev).set(server.id, { online: true, serverName: data.serverName }));
+          setStatuses((prev) =>
+            new Map(prev).set(server.id, {
+              online: true,
+              serverName: data.serverName,
+            }),
+          );
         } else {
-          setStatuses(prev => new Map(prev).set(server.id, { online: false }));
+          setStatuses((prev) =>
+            new Map(prev).set(server.id, { online: false }),
+          );
         }
       } catch {
-        setStatuses(prev => new Map(prev).set(server.id, { online: false }));
+        setStatuses((prev) => new Map(prev).set(server.id, { online: false }));
       }
     });
   }, [servers]);
@@ -60,19 +82,21 @@ export default function ServerList({ onNavigate, pairInfo }: Props) {
     }
   }, [pairInfo]);
 
-  const parseUrl = (url: string): { serverUrl: string; token: string } | null => {
+  const parseUrl = (
+    url: string,
+  ): { serverUrl: string; token: string } | null => {
     try {
       const uri = new URL(url.trim());
       const params = new URLSearchParams(uri.search);
-      const segments = uri.pathname.split('/').filter(Boolean);
+      const segments = uri.pathname.split("/").filter(Boolean);
 
-      const serverParam = params.get('server');
-      const tokenParam = params.get('token');
+      const serverParam = params.get("server");
+      const tokenParam = params.get("token");
       if (serverParam && tokenParam) {
         return { serverUrl: serverParam, token: tokenParam };
       }
 
-      if (segments.length >= 2 && segments[0] === 'pair') {
+      if (segments.length >= 2 && segments[0] === "pair") {
         const token = segments[1];
         const serverUrl = `${uri.protocol}//${uri.host}`;
         return { serverUrl, token };
@@ -87,7 +111,7 @@ export default function ServerList({ onNavigate, pairInfo }: Props) {
   const doPairing = () => {
     const parsed = parseUrl(pairingUrl);
     if (!parsed) {
-      setError('Invalid URL. Expected: https://server/pair/TOKEN');
+      setError("Invalid URL. Expected: https://server/pair/TOKEN");
       return;
     }
     doPairingWithInfo(parsed.serverUrl, parsed.token);
@@ -103,38 +127,45 @@ export default function ServerList({ onNavigate, pairInfo }: Props) {
     addLog(`Token: ${token}`);
 
     try {
-      addLog('Generating keypair...');
+      addLog("Generating keypair...");
       const keyPair = await generateKeyPair();
       const clientPublicKey = await exportPublicKey(keyPair.publicKey);
-      const privateKeyJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey);
-      addLog('Keypair generated');
+      const privateKeyJwk = await crypto.subtle.exportKey(
+        "jwk",
+        keyPair.privateKey,
+      );
+      addLog("Keypair generated");
 
       addLog(`GET ${serverUrl}/pair/${token}`);
       const getRes = await fetch(`${serverUrl}/pair/${token}`);
       if (!getRes.ok) {
         const data = await getRes.json().catch(() => ({}));
-        throw new Error(`Failed to get server key: ${data.error || getRes.status}`);
+        throw new Error(
+          `Failed to get server key: ${data.error || getRes.status}`,
+        );
       }
       const { serverPublicKey } = await getRes.json();
-      if (!serverPublicKey) throw new Error('Server returned empty public key');
-      addLog('Got server public key');
+      if (!serverPublicKey) throw new Error("Server returned empty public key");
+      addLog("Got server public key");
 
       addLog(`POST ${serverUrl}/pair/${token}`);
       const postRes = await fetch(`${serverUrl}/pair/${token}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clientPublicKey }),
       });
       if (!postRes.ok) {
         const data = await postRes.json().catch(() => ({}));
-        throw new Error(`Failed to complete pairing: ${data.error || postRes.status}`);
+        throw new Error(
+          `Failed to complete pairing: ${data.error || postRes.status}`,
+        );
       }
       const { deviceId } = await postRes.json();
-      if (!deviceId) throw new Error('Server returned empty device ID');
+      if (!deviceId) throw new Error("Server returned empty device ID");
       addLog(`Device ID: ${deviceId}`);
 
       // Verify key derivation works
-      addLog('Deriving shared secret...');
+      addLog("Deriving shared secret...");
       const serverKey = await importPublicKey(serverPublicKey);
       await deriveSharedSecret(keyPair.privateKey, serverKey);
 
@@ -166,13 +197,13 @@ export default function ServerList({ onNavigate, pairInfo }: Props) {
       setActiveServerId(config.id);
       setServers(getServers());
 
-      addLog('Pairing complete!');
+      addLog("Pairing complete!");
 
       setTimeout(() => {
-        onNavigate('chat');
+        onNavigate("chat");
       }, 500);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error';
+      const msg = err instanceof Error ? err.message : "Unknown error";
       addLog(`ERROR: ${msg}`);
       setError(msg);
     } finally {
@@ -182,7 +213,7 @@ export default function ServerList({ onNavigate, pairInfo }: Props) {
 
   const handleSelectServer = (server: ServerConfig) => {
     setActiveServerId(server.id);
-    onNavigate('chat');
+    onNavigate("chat");
   };
 
   const handleRemoveServer = (serverId: string) => {
@@ -196,7 +227,9 @@ export default function ServerList({ onNavigate, pairInfo }: Props) {
       <div className="max-w-md mx-auto p-4">
         <h1 className="text-2xl font-bold mb-1 text-center">Claude Remote</h1>
         <p className="text-[var(--color-text-secondary)] text-sm mb-6 text-center">
-          {servers.length === 0 ? 'Pair with a server to get started' : 'Select a server'}
+          {servers.length === 0
+            ? "Pair with a server to get started"
+            : "Select a server"}
         </p>
 
         {error && !pairingLog.length && (
@@ -208,7 +241,7 @@ export default function ServerList({ onNavigate, pairInfo }: Props) {
         {/* Server list */}
         {servers.length > 0 && (
           <div className="space-y-2 mb-6">
-            {servers.map(server => {
+            {servers.map((server) => {
               const status = statuses.get(server.id);
               const isConfirming = confirmDeleteId === server.id;
 
@@ -222,9 +255,15 @@ export default function ServerList({ onNavigate, pairInfo }: Props) {
                     className="w-full flex items-center gap-3 p-4 text-left hover:bg-[var(--color-bg-hover)] transition-colors"
                   >
                     {/* Status dot */}
-                    <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${
-                      status?.online ? 'bg-green-400' : status === undefined ? 'bg-gray-500 animate-pulse' : 'bg-gray-500'
-                    }`} />
+                    <div
+                      className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                        status?.online
+                          ? "bg-green-400"
+                          : status === undefined
+                            ? "bg-gray-500 animate-pulse"
+                            : "bg-gray-500"
+                      }`}
+                    />
 
                     <div className="flex-1 min-w-0">
                       <div className="font-medium truncate">
@@ -235,15 +274,26 @@ export default function ServerList({ onNavigate, pairInfo }: Props) {
                       </div>
                     </div>
 
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-[var(--color-text-tertiary)] shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-5 w-5 text-[var(--color-text-tertiary)] shrink-0"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
+                        clipRule="evenodd"
+                      />
                     </svg>
                   </button>
 
                   {/* Delete confirmation */}
                   {isConfirming ? (
                     <div className="flex items-center justify-between px-4 py-2 bg-red-900/30 border-t border-[var(--color-border-default)]">
-                      <span className="text-sm text-red-300">Remove this server?</span>
+                      <span className="text-sm text-red-300">
+                        Remove this server?
+                      </span>
                       <div className="flex gap-2">
                         <button
                           onClick={() => setConfirmDeleteId(null)}
@@ -312,7 +362,7 @@ export default function ServerList({ onNavigate, pairInfo }: Props) {
                       const text = await navigator.clipboard.readText();
                       setPairingUrl(text);
                     } catch {
-                      setError('Failed to read clipboard');
+                      setError("Failed to read clipboard");
                     }
                   }}
                   className="flex-1 px-4 py-3 bg-[var(--color-bg-hover)] rounded-lg font-semibold hover:bg-[var(--color-border-emphasis)] transition-colors"
@@ -324,13 +374,17 @@ export default function ServerList({ onNavigate, pairInfo }: Props) {
                   disabled={isPairing || !pairingUrl.trim()}
                   className="flex-1 px-4 py-3 bg-[var(--color-accent)] rounded-lg font-semibold hover:bg-[var(--color-accent-hover)] transition-colors disabled:opacity-50"
                 >
-                  {isPairing ? 'Pairing...' : 'Pair'}
+                  {isPairing ? "Pairing..." : "Pair"}
                 </button>
               </div>
 
               {servers.length > 0 && !isPairing && (
                 <button
-                  onClick={() => { setShowPairing(false); setPairingLog([]); setError(null); }}
+                  onClick={() => {
+                    setShowPairing(false);
+                    setPairingLog([]);
+                    setError(null);
+                  }}
                   className="w-full text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
                 >
                   Cancel

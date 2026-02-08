@@ -41,18 +41,18 @@ The chat interface includes a collapsible Activity panel that shows Claude's too
 
 ### Tool Icons
 
-| Icon | Tool | Description |
-|------|------|-------------|
-| 📄 | Read | Reading files |
-| ✏️ | Write | Creating new files |
-| 🔧 | Edit | Modifying existing files (shows diff) |
-| 💻 | Bash | Running shell commands |
-| 🔍 | Glob | Finding files by pattern |
-| 🔎 | Grep | Searching file contents |
-| 🤖 | Task | Spawning sub-agents |
-| 🌐 | WebFetch | Fetching web content |
-| 📝 | TodoWrite | Managing task lists |
-| ❓ | AskUserQuestion | Asking for input |
+| Icon | Tool            | Description                           |
+| ---- | --------------- | ------------------------------------- |
+| 📄   | Read            | Reading files                         |
+| ✏️   | Write           | Creating new files                    |
+| 🔧   | Edit            | Modifying existing files (shows diff) |
+| 💻   | Bash            | Running shell commands                |
+| 🔍   | Glob            | Finding files by pattern              |
+| 🔎   | Grep            | Searching file contents               |
+| 🤖   | Task            | Spawning sub-agents                   |
+| 🌐   | WebFetch        | Fetching web content                  |
+| 📝   | TodoWrite       | Managing task lists                   |
+| ❓   | AskUserQuestion | Asking for input                      |
 
 ## Getting Started
 
