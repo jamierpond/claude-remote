@@ -1,10 +1,18 @@
 import { useRef, useEffect } from "react";
 
+export interface WorktreeInfo {
+  isWorktree: true;
+  parentRepoId: string;
+  branch: string;
+  mainWorktreePath: string;
+}
+
 export interface Project {
   id: string;
   path: string;
   name: string;
   lastAccessed?: string;
+  worktree?: WorktreeInfo;
 }
 
 interface ProjectTabsProps {
@@ -92,8 +100,26 @@ export default function ProjectTabs({
                   <span className="w-2 h-2 bg-[var(--color-accent)] rounded-full animate-pulse flex-shrink-0" />
                 )}
 
+                {/* Worktree indicator */}
+                {project.worktree && (
+                  <svg
+                    className="w-3 h-3 flex-shrink-0 text-[var(--color-text-tertiary)]"
+                    viewBox="0 0 16 16"
+                    fill="currentColor"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M11.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122V6A2.5 2.5 0 0110 8.5H6a1 1 0 00-1 1v1.128a2.251 2.251 0 11-1.5 0V5.372a2.25 2.25 0 111.5 0v1.836A2.492 2.492 0 016 7h4a1 1 0 001-1v-.628A2.25 2.25 0 019.5 3.25zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5zM3.5 3.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0z"
+                    />
+                  </svg>
+                )}
+
                 {/* Project name */}
-                <span className="truncate max-w-[120px]">{project.name}</span>
+                <span className="truncate max-w-[120px]">
+                  {project.worktree
+                    ? project.worktree.branch
+                    : project.name}
+                </span>
 
                 {/* Close button */}
                 <button

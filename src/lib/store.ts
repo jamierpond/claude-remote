@@ -6,8 +6,9 @@ import {
   readdirSync,
   statSync,
 } from "fs";
-import { join, basename } from "path";
+import { join, basename, resolve } from "path";
 import { homedir } from "os";
+import { execSync } from "child_process";
 import argon2 from "argon2";
 
 const CONFIG_DIR = join(homedir(), ".config", "claude-remote");
@@ -65,11 +66,19 @@ export interface Conversation {
 }
 
 // Project-related interfaces
+export interface WorktreeInfo {
+  isWorktree: true;
+  parentRepoId: string; // e.g. "remote-claude-real"
+  branch: string; // e.g. "feature/dark-mode"
+  mainWorktreePath: string; // e.g. "/home/jamie/projects/remote-claude-real"
+}
+
 export interface Project {
   id: string; // folder name e.g. "remote-claude-real"
   path: string; // full path e.g. "/home/jamie/projects/remote-claude-real"
   name: string; // display name (from package.json or folder)
   lastAccessed?: string;
+  worktree?: WorktreeInfo;
 }
 
 export interface ProjectConversation {
@@ -344,6 +353,49 @@ function getProjectName(projectPath: string): string {
   return basename(projectPath);
 }
 
+// Detect if a directory is a git worktree (linked .git file vs .git directory)
+function detectWorktree(dirPath: string): WorktreeInfo | null {
+  try {
+    const gitPath = join(dirPath, ".git");
+    if (!existsSync(gitPath)) return null;
+
+    const stat = statSync(gitPath);
+    if (!stat.isFile()) return null; // Regular .git directory = main repo
+
+    // .git file = linked worktree. Format: "gitdir: /path/to/.git/worktrees/name"
+    const content = readFileSync(gitPath, "utf8").trim();
+    const match = content.match(/^gitdir:\s*(.+)$/);
+    if (!match) return null;
+
+    const gitdir = match[1];
+    // Navigate from .git/worktrees/<name> up to the main .git dir
+    const gitMainDir = gitdir.replace(/\/worktrees\/[^/]+$/, "");
+    // The main repo path is the parent of the .git dir
+    const mainWorktreePath = resolve(join(gitMainDir, ".."));
+    const parentRepoId = basename(mainWorktreePath);
+
+    const branch = execSync("git rev-parse --abbrev-ref HEAD", {
+      cwd: dirPath,
+      encoding: "utf-8",
+      timeout: 5000,
+    }).trim();
+
+    return {
+      isWorktree: true,
+      parentRepoId,
+      branch,
+      mainWorktreePath,
+    };
+  } catch (err) {
+    console.error(`[store] Failed to detect worktree for ${dirPath}:`, err);
+    return null;
+  }
+}
+
+function sanitizeBranchForDir(branch: string): string {
+  return branch.replace(/\//g, "-");
+}
+
 // List all available projects from ~/projects
 export function listProjects(basePath?: string): Project[] {
   const projectsBase = basePath || DEFAULT_PROJECTS_BASE;
@@ -381,11 +433,16 @@ export function listProjects(basePath?: string): Project[] {
             // Ignore
           }
 
+          const worktreeInfo = detectWorktree(fullPath);
+
           projects.push({
             id: dir,
             path: fullPath,
-            name: getProjectName(fullPath),
+            name: worktreeInfo
+              ? `${getProjectName(worktreeInfo.mainWorktreePath)} [${worktreeInfo.branch}]`
+              : getProjectName(fullPath),
             lastAccessed,
+            worktree: worktreeInfo || undefined,
           });
         }
       } catch {
@@ -521,12 +578,141 @@ export function getProject(
     const stat = statSync(fullPath);
     if (!stat.isDirectory()) return null;
 
+    const worktreeInfo = detectWorktree(fullPath);
+
     return {
       id: projectId,
       path: fullPath,
-      name: getProjectName(fullPath),
+      name: worktreeInfo
+        ? `${getProjectName(worktreeInfo.mainWorktreePath)} [${worktreeInfo.branch}]`
+        : getProjectName(fullPath),
+      worktree: worktreeInfo || undefined,
     };
   } catch {
     return null;
   }
+}
+
+// ============================================
+// Worktree management functions
+// ============================================
+
+export function listBranches(
+  projectId: string,
+  basePath?: string,
+): string[] {
+  const project = getProject(projectId, basePath);
+  if (!project) return [];
+
+  const repoPath = project.worktree
+    ? project.worktree.mainWorktreePath
+    : project.path;
+
+  try {
+    const output = execSync("git branch -a --format='%(refname:short)'", {
+      cwd: repoPath,
+      encoding: "utf-8",
+      timeout: 10000,
+    });
+    return output.trim().split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+export function createWorktree(
+  projectId: string,
+  branch: string,
+  basePath?: string,
+): Project {
+  const projectsBase = basePath || DEFAULT_PROJECTS_BASE;
+  const project = getProject(projectId, basePath);
+  if (!project) throw new Error(`Project not found: ${projectId}`);
+
+  // Get the main repo path
+  const mainRepoPath = project.worktree
+    ? project.worktree.mainWorktreePath
+    : project.path;
+  const mainRepoId = basename(mainRepoPath);
+
+  // Create directory name: repo--branch (sanitize / to -)
+  const safeBranch = sanitizeBranchForDir(branch);
+  const worktreeId = `${mainRepoId}--${safeBranch}`;
+
+  if (!validateProjectId(worktreeId)) {
+    throw new Error(`Invalid worktree directory name: ${worktreeId}`);
+  }
+
+  const worktreePath = join(projectsBase, worktreeId);
+
+  if (existsSync(worktreePath)) {
+    throw new Error(`Directory already exists: ${worktreeId}`);
+  }
+
+  // Check if the branch exists locally or remotely
+  let branchExists = false;
+  try {
+    execSync(`git rev-parse --verify ${branch}`, {
+      cwd: mainRepoPath,
+      encoding: "utf-8",
+      timeout: 5000,
+      stdio: "pipe",
+    });
+    branchExists = true;
+  } catch {
+    // Try remote
+    try {
+      execSync(`git rev-parse --verify origin/${branch}`, {
+        cwd: mainRepoPath,
+        encoding: "utf-8",
+        timeout: 5000,
+        stdio: "pipe",
+      });
+      branchExists = true;
+    } catch {
+      // Branch doesn't exist anywhere — will be created new
+    }
+  }
+
+  const cmd = branchExists
+    ? `git worktree add ${JSON.stringify(worktreePath)} ${branch}`
+    : `git worktree add -b ${branch} ${JSON.stringify(worktreePath)}`;
+
+  console.log(`[store] Creating worktree: ${cmd}`);
+  execSync(cmd, {
+    cwd: mainRepoPath,
+    encoding: "utf-8",
+    timeout: 30000,
+  });
+
+  return {
+    id: worktreeId,
+    path: worktreePath,
+    name: `${getProjectName(mainRepoPath)} [${branch}]`,
+    worktree: {
+      isWorktree: true,
+      parentRepoId: mainRepoId,
+      branch,
+      mainWorktreePath: mainRepoPath,
+    },
+  };
+}
+
+export function removeWorktree(
+  worktreeProjectId: string,
+  basePath?: string,
+): void {
+  const project = getProject(worktreeProjectId, basePath);
+  if (!project) throw new Error(`Project not found: ${worktreeProjectId}`);
+  if (!project.worktree)
+    throw new Error(`Not a worktree: ${worktreeProjectId}`);
+
+  const mainRepoPath = project.worktree.mainWorktreePath;
+
+  console.log(`[store] Removing worktree: ${project.path}`);
+  execSync(`git worktree remove ${JSON.stringify(project.path)} --force`, {
+    cwd: mainRepoPath,
+    encoding: "utf-8",
+    timeout: 30000,
+  });
 }

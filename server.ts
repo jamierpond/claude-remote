@@ -51,6 +51,10 @@ import {
   clearProjectConversation,
   getProjectSessionId,
   saveProjectSessionId,
+  // Worktree support
+  listBranches,
+  createWorktree,
+  removeWorktree,
 } from "./src/lib/store";
 import { spawnClaude, ClaudeEvent } from "./src/lib/claude";
 import {
@@ -691,6 +695,16 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         // No upstream configured, ignore
       }
 
+      // Worktree info + branches for worktree creation UI
+      const isWorktree = !!project.worktree;
+      const parentRepoId = project.worktree?.parentRepoId || null;
+      let branches: string[] = [];
+      try {
+        branches = listBranches(projectId);
+      } catch {
+        // Not critical
+      }
+
       console.log(
         `[api] Git status for ${projectId}: ${branch} ${isDirty ? "(dirty)" : "(clean)"}`,
       );
@@ -701,11 +715,109 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         files,
         ahead,
         behind,
+        isWorktree,
+        parentRepoId,
+        branches,
       });
     } catch (err) {
       // Not a git repo or git not available
       console.log(`[api] Git status failed for ${projectId}:`, err);
       return json(res, { error: "Not a git repository" }, 400);
+    }
+  }
+
+  // API: Worktree management
+  if (
+    pathname?.startsWith("/api/projects/") &&
+    pathname.endsWith("/worktrees")
+  ) {
+    const projectId = decodeURIComponent(
+      pathname.split("/api/projects/")[1].replace("/worktrees", ""),
+    );
+    if (!validateProjectId(projectId))
+      return json(res, { error: "Invalid project ID" }, 400);
+    const project = getProject(projectId);
+    if (!project) {
+      return json(res, { error: "Project not found" }, 404);
+    }
+
+    // GET: List worktrees
+    if (method === "GET") {
+      try {
+        // Use listProjects and filter to worktrees of this repo
+        const mainRepoId = project.worktree
+          ? project.worktree.parentRepoId
+          : project.id;
+        const allProjects = listProjects();
+        const worktrees = allProjects.filter(
+          (p) =>
+            p.worktree?.parentRepoId === mainRepoId || p.id === mainRepoId,
+        );
+        console.log(
+          `[api] Listed ${worktrees.length} worktrees for ${projectId}`,
+        );
+        return json(res, { worktrees });
+      } catch (err) {
+        console.error(
+          `[api] Failed to list worktrees for ${projectId}:`,
+          err,
+        );
+        return json(res, { error: String(err) }, 500);
+      }
+    }
+
+    // POST: Create worktree
+    if (method === "POST") {
+      try {
+        const body = await readBody(req);
+        const { branch } = JSON.parse(body);
+        if (!branch || typeof branch !== "string") {
+          return json(
+            res,
+            { error: "Missing or invalid branch name" },
+            400,
+          );
+        }
+
+        // Basic git ref validation
+        if (
+          /[\x00-\x1f\x7f~^:?*\[\\]/.test(branch) ||
+          branch.includes("..")
+        ) {
+          return json(res, { error: "Invalid branch name" }, 400);
+        }
+
+        const newProject = createWorktree(projectId, branch);
+        console.log(
+          `[api] Created worktree ${newProject.id} for branch ${branch}`,
+        );
+        return json(res, { project: newProject }, 201);
+      } catch (err) {
+        console.error(
+          `[api] Failed to create worktree for ${projectId}:`,
+          err,
+        );
+        return json(res, { error: String(err) }, 500);
+      }
+    }
+
+    // DELETE: Remove worktree
+    if (method === "DELETE") {
+      if (!project.worktree) {
+        return json(res, { error: "Not a worktree" }, 400);
+      }
+
+      try {
+        removeWorktree(projectId);
+        console.log(`[api] Removed worktree ${projectId}`);
+        return json(res, { success: true });
+      } catch (err) {
+        console.error(
+          `[api] Failed to remove worktree ${projectId}:`,
+          err,
+        );
+        return json(res, { error: String(err) }, 500);
+      }
     }
   }
 

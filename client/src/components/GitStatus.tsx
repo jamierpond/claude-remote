@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "../lib/api";
+import type { Project } from "./ProjectTabs";
 
 interface GitFile {
   status: string;
@@ -13,6 +14,9 @@ interface GitStatusData {
   files: GitFile[];
   ahead: number;
   behind: number;
+  isWorktree: boolean;
+  parentRepoId: string | null;
+  branches: string[];
 }
 
 // Git status code to color/label
@@ -38,17 +42,28 @@ interface GitStatusProps {
   projectId: string | null;
   serverId?: string;
   serverUrl?: string;
+  onWorktreeCreated?: (project: Project) => void;
+  onWorktreeDeleted?: (projectId: string) => void;
 }
 
 export default function GitStatus({
   projectId,
   serverId,
   serverUrl,
+  onWorktreeCreated,
+  onWorktreeDeleted,
 }: GitStatusProps) {
   const [status, setStatus] = useState<GitStatusData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(false);
+
+  // Worktree creation state
+  const [showWorktreeCreate, setShowWorktreeCreate] = useState(false);
+  const [newBranch, setNewBranch] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const fetchStatus = useCallback(async () => {
     if (!projectId) {
@@ -93,6 +108,75 @@ export default function GitStatus({
     const interval = setInterval(fetchStatus, 30000);
     return () => clearInterval(interval);
   }, [projectId, fetchStatus]);
+
+  // Reset worktree create state when dropdown closes
+  useEffect(() => {
+    if (!expanded) {
+      setShowWorktreeCreate(false);
+      setNewBranch("");
+      setCreateError(null);
+    }
+  }, [expanded]);
+
+  const handleCreateWorktree = async () => {
+    if (!projectId || !newBranch.trim()) return;
+
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const res = await apiFetch(
+        `/api/projects/${encodeURIComponent(projectId)}/worktrees`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ branch: newBranch.trim() }),
+          serverId,
+          serverUrl,
+        },
+      );
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to create worktree");
+      }
+      const data = await res.json();
+      setNewBranch("");
+      setShowWorktreeCreate(false);
+      setExpanded(false);
+      onWorktreeCreated?.(data.project);
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleDeleteWorktree = async () => {
+    if (!projectId) return;
+
+    setDeleting(true);
+    try {
+      const res = await apiFetch(
+        `/api/projects/${encodeURIComponent(projectId)}/worktrees`,
+        {
+          method: "DELETE",
+          serverId,
+          serverUrl,
+        },
+      );
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to delete worktree");
+      }
+      setExpanded(false);
+      onWorktreeDeleted?.(projectId);
+    } catch (err) {
+      setCreateError(
+        err instanceof Error ? err.message : "Failed to delete worktree",
+      );
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   if (!projectId || error) {
     return null;
@@ -167,7 +251,7 @@ export default function GitStatus({
             onClick={() => setExpanded(false)}
           />
 
-          <div className="absolute top-full right-0 mt-1 z-50 w-56 bg-[var(--color-bg-secondary)] border border-[var(--color-border-default)] rounded-lg shadow-xl overflow-hidden">
+          <div className="absolute top-full right-0 mt-1 z-50 w-64 bg-[var(--color-bg-secondary)] border border-[var(--color-border-default)] rounded-lg shadow-xl overflow-hidden">
             <div className="p-3 space-y-2">
               {/* Branch */}
               <div className="flex items-center gap-2">
@@ -184,6 +268,11 @@ export default function GitStatus({
                 <span className="text-sm text-[var(--color-text-primary)] font-medium">
                   {status.branch}
                 </span>
+                {status.isWorktree && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-bg-hover)] text-[var(--color-text-tertiary)]">
+                    worktree
+                  </span>
+                )}
               </div>
 
               {/* Status summary */}
@@ -280,6 +369,118 @@ export default function GitStatus({
                 Refresh
               </button>
             </div>
+
+            {/* Worktree section */}
+            <div className="border-t border-[var(--color-border-default)] p-2">
+              {!showWorktreeCreate ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowWorktreeCreate(true);
+                  }}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] rounded transition-colors"
+                >
+                  <svg
+                    className="w-3.5 h-3.5"
+                    viewBox="0 0 16 16"
+                    fill="currentColor"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M8 2a.75.75 0 01.75.75v4.5h4.5a.75.75 0 010 1.5h-4.5v4.5a.75.75 0 01-1.5 0v-4.5h-4.5a.75.75 0 010-1.5h4.5v-4.5A.75.75 0 018 2z"
+                    />
+                  </svg>
+                  New worktree
+                </button>
+              ) : (
+                <div
+                  className="space-y-2"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {createError && (
+                    <p className="text-xs text-red-400 px-1 select-text">
+                      {createError}
+                    </p>
+                  )}
+                  <input
+                    type="text"
+                    value={newBranch}
+                    onChange={(e) => setNewBranch(e.target.value)}
+                    placeholder="Branch name..."
+                    className="w-full px-2 py-1.5 text-[16px] bg-[var(--color-bg-primary)] border border-[var(--color-border-default)] rounded text-[var(--color-text-primary)] placeholder-[var(--color-text-tertiary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleCreateWorktree();
+                      if (e.key === "Escape") {
+                        setShowWorktreeCreate(false);
+                        setNewBranch("");
+                        setCreateError(null);
+                      }
+                    }}
+                  />
+
+                  {/* Branch suggestions */}
+                  {status.branches && status.branches.length > 0 && (
+                    <div className="max-h-24 overflow-y-auto">
+                      {status.branches
+                        .filter(
+                          (b) =>
+                            b
+                              .toLowerCase()
+                              .includes(newBranch.toLowerCase()) &&
+                            b !== status.branch,
+                        )
+                        .slice(0, 5)
+                        .map((b) => (
+                          <button
+                            key={b}
+                            onClick={() => setNewBranch(b)}
+                            className="w-full text-left px-2 py-1 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] rounded truncate"
+                          >
+                            {b}
+                          </button>
+                        ))}
+                    </div>
+                  )}
+
+                  <div className="flex gap-1">
+                    <button
+                      onClick={handleCreateWorktree}
+                      disabled={!newBranch.trim() || creating}
+                      className="flex-1 px-2 py-1.5 text-xs font-medium bg-[var(--color-accent)] text-white rounded hover:bg-[var(--color-accent-hover)] transition-colors disabled:opacity-40"
+                    >
+                      {creating ? "Creating..." : "Create"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowWorktreeCreate(false);
+                        setNewBranch("");
+                        setCreateError(null);
+                      }}
+                      className="px-2 py-1.5 text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] rounded transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Delete worktree (only for worktree projects) */}
+            {status.isWorktree && (
+              <div className="border-t border-[var(--color-border-default)] p-2">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteWorktree();
+                  }}
+                  disabled={deleting}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-1.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded transition-colors disabled:opacity-40"
+                >
+                  {deleting ? "Deleting..." : "Delete worktree"}
+                </button>
+              </div>
+            )}
           </div>
         </>
       )}

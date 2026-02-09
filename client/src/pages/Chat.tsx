@@ -1287,6 +1287,8 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
             projectId={activeProjectId}
             serverId={serverConfig.id}
             serverUrl={serverConfig.serverUrl}
+            onWorktreeCreated={handleSelectProject}
+            onWorktreeDeleted={handleCloseProject}
           />
         </div>
         <OverflowMenu
