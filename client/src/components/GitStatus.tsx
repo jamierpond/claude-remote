@@ -393,10 +393,7 @@ export default function GitStatus({
                   New worktree
                 </button>
               ) : (
-                <div
-                  className="space-y-2"
-                  onClick={(e) => e.stopPropagation()}
-                >
+                <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
                   {createError && (
                     <p className="text-xs text-red-400 px-1 select-text">
                       {createError}
@@ -425,9 +422,7 @@ export default function GitStatus({
                       {status.branches
                         .filter(
                           (b) =>
-                            b
-                              .toLowerCase()
-                              .includes(newBranch.toLowerCase()) &&
+                            b.toLowerCase().includes(newBranch.toLowerCase()) &&
                             b !== status.branch,
                         )
                         .slice(0, 5)

@@ -11,11 +11,13 @@ The existing multi-project tab system already supports independent conversations
 **Worktrees live in `~/projects/` with naming convention `{repo}--{branch}`.**
 
 Example: creating worktree for `feature/dark-mode` from `remote-claude-real` produces:
+
 ```
 ~/projects/remote-claude-real--feature-dark-mode/
 ```
 
 This works because:
+
 - `listProjects()` already scans `~/projects/` — worktrees have a `.git` file (pointing to parent) which counts as a project marker
 - `validateProjectId()` accepts `--` in names (no forbidden chars)
 - No changes needed to conversation storage, Claude spawning, or WebSocket routing
@@ -26,6 +28,7 @@ This works because:
 ### 1. `src/lib/store.ts` — Worktree detection + CRUD
 
 **Extend `Project` interface** (line 68):
+
 ```typescript
 export interface Project {
   id: string;
@@ -34,7 +37,7 @@ export interface Project {
   lastAccessed?: string;
   worktree?: {
     isWorktree: boolean;
-    parentRepoId: string;  // e.g. "remote-claude-real"
+    parentRepoId: string; // e.g. "remote-claude-real"
     branch: string;
   };
 }
@@ -73,6 +76,7 @@ Import new functions: `listWorktrees`, `createWorktree`, `removeWorktree` from s
 This is the primary entry point on mobile (the branch badge in the header).
 
 **Add to the expanded dropdown:**
+
 - "New worktree" button below the Refresh button
 - Tapping it opens a small inline modal with:
   - Text input for branch name
@@ -85,6 +89,7 @@ This is the primary entry point on mobile (the branch badge in the header).
 ### 5. `client/src/components/ProjectPicker.tsx` — Grouped display
 
 Group worktrees under their parent repo in the project list:
+
 ```
 📁 remote-claude-real              main
    🔀 feature-dark-mode            worktree

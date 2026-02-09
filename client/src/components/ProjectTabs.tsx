@@ -116,9 +116,7 @@ export default function ProjectTabs({
 
                 {/* Project name */}
                 <span className="truncate max-w-[120px]">
-                  {project.worktree
-                    ? project.worktree.branch
-                    : project.name}
+                  {project.worktree ? project.worktree.branch : project.name}
                 </span>
 
                 {/* Close button */}

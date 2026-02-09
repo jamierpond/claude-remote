@@ -597,10 +597,7 @@ export function getProject(
 // Worktree management functions
 // ============================================
 
-export function listBranches(
-  projectId: string,
-  basePath?: string,
-): string[] {
+export function listBranches(projectId: string, basePath?: string): string[] {
   const project = getProject(projectId, basePath);
   if (!project) return [];
 

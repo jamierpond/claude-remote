@@ -750,18 +750,14 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
           : project.id;
         const allProjects = listProjects();
         const worktrees = allProjects.filter(
-          (p) =>
-            p.worktree?.parentRepoId === mainRepoId || p.id === mainRepoId,
+          (p) => p.worktree?.parentRepoId === mainRepoId || p.id === mainRepoId,
         );
         console.log(
           `[api] Listed ${worktrees.length} worktrees for ${projectId}`,
         );
         return json(res, { worktrees });
       } catch (err) {
-        console.error(
-          `[api] Failed to list worktrees for ${projectId}:`,
-          err,
-        );
+        console.error(`[api] Failed to list worktrees for ${projectId}:`, err);
         return json(res, { error: String(err) }, 500);
       }
     }
@@ -772,18 +768,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         const body = await readBody(req);
         const { branch } = JSON.parse(body);
         if (!branch || typeof branch !== "string") {
-          return json(
-            res,
-            { error: "Missing or invalid branch name" },
-            400,
-          );
+          return json(res, { error: "Missing or invalid branch name" }, 400);
         }
 
         // Basic git ref validation
-        if (
-          /[\x00-\x1f\x7f~^:?*\[\\]/.test(branch) ||
-          branch.includes("..")
-        ) {
+        const hasBadChars = branch.split("").some((ch) => {
+          const code = ch.charCodeAt(0);
+          return code <= 0x1f || code === 0x7f || "~^:?*[]\\".includes(ch);
+        });
+        if (hasBadChars || branch.includes("..")) {
           return json(res, { error: "Invalid branch name" }, 400);
         }
 
@@ -793,10 +786,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         );
         return json(res, { project: newProject }, 201);
       } catch (err) {
-        console.error(
-          `[api] Failed to create worktree for ${projectId}:`,
-          err,
-        );
+        console.error(`[api] Failed to create worktree for ${projectId}:`, err);
         return json(res, { error: String(err) }, 500);
       }
     }
@@ -812,10 +802,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         console.log(`[api] Removed worktree ${projectId}`);
         return json(res, { success: true });
       } catch (err) {
-        console.error(
-          `[api] Failed to remove worktree ${projectId}:`,
-          err,
-        );
+        console.error(`[api] Failed to remove worktree ${projectId}:`, err);
         return json(res, { error: String(err) }, 500);
       }
     }

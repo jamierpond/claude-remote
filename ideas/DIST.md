@@ -3,12 +3,15 @@
 ## Client (App Store)
 
 ### PWA (Current)
+
 Already working with push notifications, home screen install, standalone mode on iOS. Covers 90% of use cases. Limitation: Apple's restrictions on PWA capabilities (no background fetch, limited push reliability).
 
 ### Capacitor (Recommended next step)
+
 Wrap the existing Vite React app in a native shell. Minimal code changes — web app runs inside WKWebView.
 
 Benefits over PWA:
+
 - Reliable native push via APNs
 - Keychain storage for encryption keys/PIN
 - Face ID / Touch ID for biometric auth
@@ -16,6 +19,7 @@ Benefits over PWA:
 - App Store presence, TestFlight updates
 
 Costs:
+
 - Apple Developer account ($99/year)
 - App Store review (add biometric auth + Keychain to avoid "thin wrapper" rejection)
 - Xcode project + signing certificate maintenance
@@ -30,31 +34,38 @@ Costs:
 ## Server
 
 ### Option 1: npm package
+
 ```bash
 npx claude-remote
 ```
+
 - Publish to npm, one-command setup
 - Requires Node 22+ and Claude CLI on the machine
 - `argon2` native dep needs build tools — consider swapping for pure-JS alternative (`@noble/hashes` with scrypt)
 - Bundle the built client into the package
 
 ### Option 2: Docker image
+
 ```bash
 docker run -p 6767:6767 -v ~/.config/claude-remote:/data jamierpond/claude-remote
 ```
+
 - Publish to Docker Hub / GitHub Container Registry
 - Docker Compose file with Cloudflare tunnel sidecar for turnkey setup
 - Challenge: Claude CLI needs host filesystem access for coding tasks
 
 ### Option 3: Single binary
+
 - Compile with `bun build --compile` or similar
 - No Node/npm required — download and run
 - Need to swap argon2 for pure-JS to avoid native deps
 
 ### Option 4: Homebrew tap
+
 ```bash
 brew install jamierpond/tap/claude-remote
 ```
+
 - Great for macOS users (primary target audience)
 - Wrap npm package or compiled binary
 - Include launchd plist for running as a service
