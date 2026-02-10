@@ -386,7 +386,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   const extraOrigins = (process.env.CORS_ORIGINS || "")
     .split(",")
     .filter(Boolean);
-  const allowedOrigins = [clientUrl, "https://ai.pond.audio", ...extraOrigins];
+  const allowedOrigins = [clientUrl, ...extraOrigins].filter(Boolean);
   const origin = req.headers["origin"];
   if (origin && allowedOrigins.includes(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);

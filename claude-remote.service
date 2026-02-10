@@ -4,16 +4,16 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/jamie/projects/remote-claude-real
-ExecStart=/home/jamie/.nix-profile/bin/pnpm tsx server.ts
+# Update these paths to match your installation
+WorkingDirectory=%h/claude-remote
+ExecStart=pnpm tsx server.ts
 Environment=NODE_ENV=production
-Environment=PATH=/home/jamie/.local/bin:/home/jamie/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin
 Restart=always
 RestartSec=3
 
-# Logging to file
-StandardOutput=append:/home/jamie/projects/remote-claude-real/logs/daemon-server.log
-StandardError=append:/home/jamie/projects/remote-claude-real/logs/daemon-server.log
+# Logging
+StandardOutput=append:%h/claude-remote/logs/daemon-server.log
+StandardError=append:%h/claude-remote/logs/daemon-server.log
 
 [Install]
 WantedBy=default.target

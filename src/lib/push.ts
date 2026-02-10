@@ -35,7 +35,7 @@ export function initVapid(): VapidKeys {
       vapidKeys = JSON.parse(readFileSync(VAPID_PATH, "utf8"));
       if (vapidKeys) {
         webpush.setVapidDetails(
-          "https://ai.pond.audio",
+          process.env.CLIENT_URL || "https://localhost",
           vapidKeys.publicKey,
           vapidKeys.privateKey,
         );
@@ -52,7 +52,7 @@ export function initVapid(): VapidKeys {
   vapidKeys = { publicKey: keys.publicKey, privateKey: keys.privateKey };
   writeFileSync(VAPID_PATH, JSON.stringify(vapidKeys, null, 2));
   webpush.setVapidDetails(
-    "https://ai.pond.audio",
+    process.env.CLIENT_URL || "https://localhost",
     vapidKeys.publicKey,
     vapidKeys.privateKey,
   );

@@ -47,7 +47,7 @@ npx claude-remote
 ### Option 2: Docker image
 
 ```bash
-docker run -p 6767:6767 -v ~/.config/claude-remote:/data jamierpond/claude-remote
+docker run -p 6767:6767 -v ~/.config/claude-remote:/data your-org/claude-remote
 ```
 
 - Publish to Docker Hub / GitHub Container Registry
@@ -63,7 +63,7 @@ docker run -p 6767:6767 -v ~/.config/claude-remote:/data jamierpond/claude-remot
 ### Option 4: Homebrew tap
 
 ```bash
-brew install jamierpond/tap/claude-remote
+brew install your-org/tap/claude-remote
 ```
 
 - Great for macOS users (primary target audience)

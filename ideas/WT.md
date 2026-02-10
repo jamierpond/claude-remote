@@ -94,7 +94,7 @@ Group worktrees under their parent repo in the project list:
 📁 remote-claude-real              main
    🔀 feature-dark-mode            worktree
    🔀 bugfix-auth                  worktree
-📁 pond.audio                      main
+📁 my-project                      main
 ```
 
 Worktree entries rendered indented with branch icon. Parent repos show their branch name. Search still works across all entries.
