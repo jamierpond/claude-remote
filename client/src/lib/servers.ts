@@ -11,6 +11,8 @@ export interface ServerConfig {
   privateKey: string; // JWK JSON string
   serverPublicKey: string; // base64
   pairedAt: string;
+  deviceToken?: string; // server-issued device token for HTTP auth
+  tokenExpiresAt?: string; // ISO timestamp when device token expires
 }
 
 const SERVERS_KEY = "claude-remote-servers";
@@ -33,6 +35,18 @@ export function addServer(config: ServerConfig): void {
   const servers = getServers();
   servers.push(config);
   saveServers(servers);
+}
+
+export function updateServer(
+  serverId: string,
+  updates: Partial<ServerConfig>,
+): void {
+  const servers = getServers();
+  const idx = servers.findIndex((s) => s.id === serverId);
+  if (idx !== -1) {
+    servers[idx] = { ...servers[idx], ...updates };
+    saveServers(servers);
+  }
 }
 
 export function removeServer(serverId: string): void {

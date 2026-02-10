@@ -160,7 +160,7 @@ export default function ServerList({ onNavigate, pairInfo }: Props) {
           `Failed to complete pairing: ${data.error || postRes.status}`,
         );
       }
-      const { deviceId } = await postRes.json();
+      const { deviceId, deviceToken, tokenExpiresAt } = await postRes.json();
       if (!deviceId) throw new Error("Server returned empty device ID");
       addLog(`Device ID: ${deviceId}`);
 
@@ -191,6 +191,8 @@ export default function ServerList({ onNavigate, pairInfo }: Props) {
         privateKey: JSON.stringify(privateKeyJwk),
         serverPublicKey,
         pairedAt: new Date().toISOString(),
+        deviceToken,
+        tokenExpiresAt,
       };
 
       addServer(config);

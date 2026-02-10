@@ -1,21 +1,34 @@
 /**
  * Authenticated fetch wrapper for API calls.
  * Supports multi-server: pass serverId + serverUrl for cross-origin requests.
+ * Auth header is SHA-256(pin + deviceToken) instead of raw PIN.
  */
+
+import { getServers } from "./servers";
 
 export interface ApiOptions extends RequestInit {
   serverId?: string;
   serverUrl?: string;
 }
 
-export function apiFetch(
+async function computeAuthHash(
+  pin: string,
+  deviceToken: string,
+): Promise<string> {
+  const data = new TextEncoder().encode(pin + deviceToken);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export async function apiFetch(
   input: RequestInfo | URL,
   init?: ApiOptions,
 ): Promise<Response> {
   const headers = new Headers(init?.headers);
   const serverId = init?.serverId;
 
-  // Read PIN for this specific server (or legacy key)
+  // Build auth header from SHA-256(pin + deviceToken)
   try {
     const pinKey = serverId
       ? `claude-remote-pin-${serverId}`
@@ -24,7 +37,14 @@ export function apiFetch(
     if (stored) {
       const { pin, exp } = JSON.parse(stored);
       if (Date.now() <= exp && pin) {
-        headers.set("Authorization", `Bearer ${pin}`);
+        // Find the device token for this server
+        const server = serverId
+          ? getServers().find((s) => s.id === serverId)
+          : null;
+        if (server?.deviceToken) {
+          const authHash = await computeAuthHash(pin, server.deviceToken);
+          headers.set("Authorization", `Bearer ${authHash}`);
+        }
       }
     }
   } catch {

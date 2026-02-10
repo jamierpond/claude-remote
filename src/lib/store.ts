@@ -20,6 +20,8 @@ export interface Device {
   publicKey: string;
   sharedSecret: string;
   createdAt: string;
+  token: string;
+  tokenExpiresAt: string;
 }
 
 export interface ServerState {

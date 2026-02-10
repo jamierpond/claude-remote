@@ -22,6 +22,7 @@ import {
   getServerPin,
   setServerPin,
   clearServerPin,
+  getServers,
 } from "../lib/servers";
 import {
   registerServiceWorker,
@@ -266,6 +267,8 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
   const [showFileTree, setShowFileTree] = useState(false);
   const [showDiffViewer, setShowDiffViewer] = useState(false);
   const [showPushBanner, setShowPushBanner] = useState(false);
+  const [tokenExpiryDismissed, setTokenExpiryDismissed] = useState(false);
+  const tokenExpiresAt = serverConfig.tokenExpiresAt || null;
   const tabsRestoredRef = useRef(false);
 
   // Refs for streaming (per-project)
@@ -729,8 +732,19 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
           setIsReconnecting(false);
           setReconnectAttempt(0);
           reconnectAttemptRef.current = 0;
-          setError(msg.error || "Authentication failed - please re-enter PIN");
-          setView("pin");
+
+          if (msg.error === "device_expired") {
+            setError(
+              "Device authorization has expired. Please re-pair this device.",
+            );
+            // Redirect to server list after a short delay
+            setTimeout(() => onNavigate("servers"), 3000);
+          } else {
+            setError(
+              msg.error || "Authentication failed - please re-enter PIN",
+            );
+            setView("pin");
+          }
         } else if (msg.type === "streaming_restore" && projectId) {
           console.log(`Restoring streaming state for ${projectId}:`, {
             thinking: msg.thinking?.length || 0,
@@ -1410,6 +1424,53 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
           </div>
         </div>
       )}
+
+      {/* Device token expiry warning banner */}
+      {(() => {
+        if (!tokenExpiresAt) return null;
+        const daysLeft = Math.ceil(
+          (new Date(tokenExpiresAt).getTime() - Date.now()) /
+            (1000 * 60 * 60 * 24),
+        );
+        if (daysLeft > 14) return null;
+        const isUrgent = daysLeft <= 7;
+        if (!isUrgent && tokenExpiryDismissed) return null;
+        return (
+          <div
+            className={`flex items-center justify-between px-4 py-2 border-b text-sm ${
+              isUrgent
+                ? "bg-red-900/80 border-red-700 text-red-200"
+                : "bg-yellow-900/80 border-yellow-700 text-yellow-200"
+            }`}
+          >
+            <span>
+              {daysLeft <= 0
+                ? "Device authorization has expired. Re-pair to continue."
+                : `Device authorization expires in ${daysLeft} day${daysLeft !== 1 ? "s" : ""}. Re-pair to continue access.`}
+            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => onNavigate("servers")}
+                className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                  isUrgent
+                    ? "bg-red-700 hover:bg-red-600 text-white"
+                    : "bg-yellow-700 hover:bg-yellow-600 text-white"
+                }`}
+              >
+                Re-pair
+              </button>
+              {!isUrgent && (
+                <button
+                  onClick={() => setTokenExpiryDismissed(true)}
+                  className="px-3 py-1 text-xs text-yellow-300 hover:text-yellow-100 transition-colors"
+                >
+                  Later
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Project Picker Modal */}
       <ProjectPicker
