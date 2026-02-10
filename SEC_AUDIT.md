@@ -1,14 +1,34 @@
 # Security Audit: claude-remote
 
 **Date:** 2026-02-05
+**Updated:** 2026-02-10
 **Scope:** `server.ts`, `src/lib/`, `client/src/`
 **Objective:** Find Remote Code Execution (RCE) vectors
 
 ---
 
+## Remediation Status
+
+| Finding                                  | Severity | Status                                                                           |
+| ---------------------------------------- | -------- | -------------------------------------------------------------------------------- |
+| Path traversal in static file serving    | CRITICAL | **FIXED** — `resolve()` + `startsWith()` boundary check                          |
+| Unauthenticated HTTP API endpoints       | CRITICAL | **FIXED** — Bearer PIN required on all `/api/*` routes                           |
+| Full unauthenticated RCE kill chain      | CRITICAL | **FIXED** — Both prerequisites (above) are resolved                              |
+| Path traversal in `projectId`            | HIGH     | **FIXED** — `validateProjectId()` rejects `..`, `/`, `\`, `\0`                   |
+| CORS wildcard                            | HIGH     | **FIXED** — Restricted to `CLIENT_URL` + `CORS_ORIGINS` env var                  |
+| `execSync` with traversed `cwd`          | MEDIUM   | **FIXED** — Auth gate + projectId validation                                     |
+| Brute-force device decryption            | MEDIUM   | **ACCEPTED** — Iterates all devices with no early return to prevent timing leaks |
+| Unauthenticated process signal injection | MEDIUM   | **FIXED** — Dev endpoints behind auth gate                                       |
+| PIN cached in localStorage               | LOW      | OPEN                                                                             |
+| Shared secret in localStorage            | LOW      | OPEN                                                                             |
+
+---
+
 ## Executive Summary
 
-A **full unauthenticated RCE chain** exists. An attacker with network access to the server (through the Cloudflare tunnel at `your-server.example.com`) can read all crypto secrets via path traversal, pair their own device, authenticate, and execute arbitrary commands through Claude CLI. No credentials are needed upfront.
+At the time of the initial audit (2026-02-05), a **full unauthenticated RCE chain** existed: an attacker with network access could read crypto secrets via path traversal, pair their own device, and execute arbitrary commands through Claude CLI with zero prior credentials.
+
+**All CRITICAL and HIGH findings have been remediated.** The remaining OPEN items are LOW severity client-side storage concerns.
 
 ---
 
@@ -17,6 +37,7 @@ A **full unauthenticated RCE chain** exists. An attacker with network access to 
 **File:** `server.ts:578-603`
 **Severity:** CRITICAL
 **Auth required:** None
+**Status:** FIXED — Static file handler now uses `resolve()` + `startsWith(distPath)` boundary check. Any resolved path outside the dist directory returns 403.
 
 The static file handler joins the URL pathname directly into `path.join()` without sanitization:
 
@@ -66,6 +87,7 @@ Any file readable by the process user is served if its full resolved path contai
 **File:** `server.ts:287-576`
 **Severity:** CRITICAL
 **Auth required:** None
+**Status:** FIXED — All `/api/*` routes now require Bearer PIN via `checkApiAuth()`, except `/api/status` which returns limited info.
 
 Every HTTP endpoint is world-readable/writable. There is zero authentication on REST routes — only WebSocket connections check the PIN.
 
@@ -105,6 +127,8 @@ curl -X POST 'https://your-server.example.com/api/projects/remote-claude-real/ca
 ---
 
 ## CRITICAL: Full Unauthenticated RCE Kill Chain
+
+**Status:** FIXED — Both prerequisites (path traversal + unauthenticated endpoints) are resolved. The kill chain is no longer exploitable.
 
 Combining the above two vulnerabilities with the fact that Claude is spawned with `--dangerously-skip-permissions`:
 
@@ -161,6 +185,7 @@ ws.send(
 **File:** `src/lib/store.ts:235-237, 429-431`
 **Severity:** HIGH
 **Auth required:** WebSocket (encrypted + PIN)
+**Status:** FIXED — `validateProjectId()` rejects any projectId containing `..`, `/`, `\`, or null bytes. Applied to all HTTP and WebSocket handlers.
 
 The `projectId` from WebSocket messages flows into `path.join()` unsanitized:
 
@@ -196,6 +221,7 @@ ws.send(
 
 **File:** `server.ts:276`
 **Severity:** HIGH
+**Status:** FIXED — CORS restricted to `CLIENT_URL` + optional `CORS_ORIGINS` env var. No wildcard.
 
 ```typescript
 res.setHeader("Access-Control-Allow-Origin", "*");
@@ -215,6 +241,7 @@ Any website the user visits can make cross-origin requests to the API. Combined 
 **File:** `server.ts:447-474`
 **Severity:** MEDIUM
 **Auth required:** None (HTTP endpoint is unauthenticated)
+**Status:** FIXED — Endpoint now requires Bearer PIN auth, and projectId is validated to prevent traversal.
 
 The git status endpoint runs `execSync('git rev-parse ...')` with `cwd: project.path` where `project.path` comes from the `projectId` URL segment after path traversal through `getProject()`. While the command strings themselves are hardcoded (no injection), a malicious `.gitconfig` or `.git/hooks/` in the traversed directory could execute code when git runs.
 
@@ -226,6 +253,7 @@ Additionally, this endpoint is **completely unauthenticated**, so the traversal 
 
 **File:** `server.ts:254-264`
 **Severity:** MEDIUM
+**Status:** ACCEPTED — Lookup now iterates all devices without early return to prevent timing side-channels. Rate limiting on auth attempts mitigates DoS.
 
 ```typescript
 function findDeviceByDecryption(encrypted: EncryptedData): Device | null {
@@ -248,6 +276,7 @@ Device identification works by trying every device's key until decryption succee
 **File:** `server.ts:320-338`
 **Severity:** MEDIUM
 **Auth required:** None
+**Status:** FIXED — Dev endpoints now behind `checkApiAuth()` gate.
 
 ```typescript
 if (pathname === '/api/dev/full-reload' && method === 'POST') {
