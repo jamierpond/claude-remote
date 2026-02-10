@@ -9,6 +9,7 @@ interface StreamingResponseProps {
   content?: string;
   isStreaming?: boolean;
   task?: string;
+  statusMessage?: string;
   startedAt?: string;
   completedAt?: string;
 }
@@ -360,6 +361,7 @@ export default memo(function StreamingResponse({
   content,
   isStreaming = false,
   task,
+  statusMessage,
   startedAt,
   completedAt,
 }: StreamingResponseProps) {
@@ -374,12 +376,26 @@ export default memo(function StreamingResponse({
     if (content) return "responding";
     if (activity.length > 0) return "working";
     if (thinking) return "thinking";
+    if (statusMessage) return "status";
     return "starting";
-  }, [isStreaming, content, activity.length, thinking]);
+  }, [isStreaming, content, activity.length, thinking, statusMessage]);
+
+  // Format status messages for display
+  const statusLabel = useMemo(() => {
+    if (!statusMessage) return "";
+    const labels: Record<string, string> = {
+      compacting: "Compacting context...",
+    };
+    return labels[statusMessage] || `${statusMessage}...`;
+  }, [statusMessage]);
 
   const phaseLabels: Record<string, { label: string; color: string }> = {
     starting: {
       label: "Starting...",
+      color: "text-[var(--color-text-secondary)]",
+    },
+    status: {
+      label: statusLabel,
       color: "text-[var(--color-text-secondary)]",
     },
     thinking: {

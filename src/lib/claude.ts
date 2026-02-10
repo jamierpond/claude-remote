@@ -19,6 +19,7 @@ export interface ClaudeEvent {
     | "error"
     | "done"
     | "session_init"
+    | "status"
     | "tool_use"
     | "tool_result";
   text?: string;
@@ -126,6 +127,9 @@ export function spawnClaude(
       if (newSessionId) {
         onEvent({ type: "session_init", sessionId: newSessionId });
       }
+    } else if (data.type === "system" && data.subtype === "status") {
+      console.log("[claude] Status:", data.status);
+      onEvent({ type: "status", text: data.status });
     } else if (data.type === "assistant" && data.message) {
       // Extract content from the message
       const content = data.message.content;

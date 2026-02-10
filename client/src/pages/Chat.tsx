@@ -73,6 +73,7 @@ interface ProjectState {
   currentTask: string;
   taskStartTime: number | null;
   pendingQuestion: PendingQuestionData | null;
+  statusMessage: string;
 }
 
 interface OverflowMenuProps {
@@ -236,6 +237,7 @@ function createEmptyProjectState(): ProjectState {
     currentTask: "",
     taskStartTime: null,
     pendingQuestion: null,
+    statusMessage: "",
   };
 }
 
@@ -315,6 +317,7 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
   const currentActivity = activeState.currentActivity;
   const currentTask = activeState.currentTask;
   const taskStartTime = activeState.taskStartTime;
+  const statusMessage = activeState.statusMessage;
 
   const openProjectIds = useMemo(
     () => new Set(openProjects.map((p) => p.id)),
@@ -747,6 +750,11 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
             currentResponse: msg.text || "",
             currentActivity: msg.activity || [],
           }));
+        } else if (msg.type === "status" && projectId) {
+          updateProjectState(projectId, (state) => ({
+            ...state,
+            statusMessage: msg.text || "",
+          }));
         } else if (msg.type === "thinking" && projectId) {
           const currentThinking = thinkingRefs.current.get(projectId) || "";
           thinkingRefs.current.set(
@@ -838,6 +846,7 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
               currentActivity: [],
               currentTask: "",
               taskStartTime: null,
+              statusMessage: "",
               messages:
                 thinking || response || activity.length > 0
                   ? [
@@ -1487,6 +1496,7 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
                 activity={currentActivity}
                 content={currentResponse}
                 task={currentTask}
+                statusMessage={statusMessage}
                 startedAt={
                   taskStartTime
                     ? new Date(taskStartTime).toISOString()
