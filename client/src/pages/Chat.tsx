@@ -278,6 +278,7 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
   // Reconnection state
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
+  const [showReconnectedBanner, setShowReconnectedBanner] = useState(false);
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cachedPinRef = useRef<string | null>(null);
@@ -607,6 +608,11 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
         const projectId = msg.projectId;
 
         if (msg.type === "auth_ok") {
+          // Show reconnected banner if we were reconnecting (not initial connect)
+          if (reconnectAttemptRef.current > 0) {
+            setShowReconnectedBanner(true);
+            setTimeout(() => setShowReconnectedBanner(false), 5000);
+          }
           setError("");
           setView("chat");
           setIsReconnecting(false);
@@ -1339,6 +1345,26 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
             className="ml-2 px-2 py-0.5 text-xs bg-yellow-800 hover:bg-yellow-700 rounded transition-colors"
           >
             Use PIN
+          </button>
+        </div>
+      )}
+
+      {/* Reconnected banner */}
+      {showReconnectedBanner && (
+        <div className="flex items-center justify-center gap-2 px-4 py-2 bg-green-900/80 border-b border-green-700 text-green-200 text-sm">
+          <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+            <path
+              fillRule="evenodd"
+              d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+              clipRule="evenodd"
+            />
+          </svg>
+          <span>Server restarted — redeploy successful</span>
+          <button
+            onClick={() => setShowReconnectedBanner(false)}
+            className="ml-2 px-2 py-0.5 text-xs bg-green-800 hover:bg-green-700 rounded transition-colors"
+          >
+            Dismiss
           </button>
         </div>
       )}
