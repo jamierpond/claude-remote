@@ -96,11 +96,19 @@ function checkAuthRateLimit(ip: string): boolean {
   const now = Date.now();
   const entry = authAttempts.get(ip);
   if (!entry || now >= entry.resetAt) {
-    authAttempts.set(ip, { count: 1, resetAt: now + AUTH_WINDOW_MS });
     return true;
   }
-  entry.count++;
-  return entry.count <= AUTH_MAX_ATTEMPTS;
+  return entry.count < AUTH_MAX_ATTEMPTS;
+}
+
+function recordAuthFailure(ip: string): void {
+  const now = Date.now();
+  const entry = authAttempts.get(ip);
+  if (!entry || now >= entry.resetAt) {
+    authAttempts.set(ip, { count: 1, resetAt: now + AUTH_WINDOW_MS });
+  } else {
+    entry.count++;
+  }
 }
 
 // Device token TTL: 6 months
