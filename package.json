@@ -1,9 +1,12 @@
 {
   "name": "claude-remote",
   "version": "0.1.0",
-  "private": true,
   "license": "MIT",
   "author": "Jamie Pond",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jamierpond/claude-remote.git"
+  },
   "scripts": {
     "dev": "concurrently -n server,client -c blue,green \"tsx --watch server.ts 2>&1 | tee logs/server.log\" \"vite 2>&1 | tee logs/client.log\"",
     "dev:server": "tsx --watch server.ts 2>&1 | tee logs/server.log",

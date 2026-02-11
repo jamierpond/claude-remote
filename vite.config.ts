@@ -10,7 +10,9 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       host: true,
-      allowedHosts: ["ai.pond.audio"],
+      allowedHosts: env.VITE_ALLOWED_HOSTS
+        ? env.VITE_ALLOWED_HOSTS.split(",")
+        : true,
       proxy: {
         "/api": {
           target: "http://localhost:6767",

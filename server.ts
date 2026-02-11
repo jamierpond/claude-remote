@@ -4,7 +4,7 @@ config({ path: ".env.local" });
 import { createServer, IncomingMessage, ServerResponse } from "http";
 import { parse } from "url";
 import { WebSocketServer, WebSocket } from "ws";
-import { randomBytes, timingSafeEqual } from "crypto";
+import { randomBytes, timingSafeEqual, createHash } from "crypto";
 import {
   readFileSync,
   existsSync,
@@ -101,6 +101,22 @@ function checkAuthRateLimit(ip: string): boolean {
   }
   entry.count++;
   return entry.count <= AUTH_MAX_ATTEMPTS;
+}
+
+// Device token TTL: 6 months
+const DEVICE_TOKEN_TTL_MS = 6 * 30 * 24 * 60 * 60 * 1000;
+
+function generateDeviceToken(): { token: string; tokenExpiresAt: string } {
+  return {
+    token: randomBytes(32).toString("hex"),
+    tokenExpiresAt: new Date(Date.now() + DEVICE_TOKEN_TTL_MS).toISOString(),
+  };
+}
+
+function computeAuthHash(pin: string, deviceToken: string): string {
+  return createHash("sha256")
+    .update(pin + deviceToken)
+    .digest("hex");
 }
 
 // Broadcast reload message to all connected clients (for dev hot reload)
@@ -357,21 +373,43 @@ async function readBody(req: IncomingMessage): Promise<string> {
   return body;
 }
 
-// API authentication: compare PIN using timing-safe comparison
+// API authentication: validate SHA-256(PIN + deviceToken) with rate limiting
 function checkApiAuth(req: IncomingMessage, res: ServerResponse): boolean {
+  const clientIp =
+    req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim() ||
+    req.socket.remoteAddress ||
+    "unknown";
+
+  if (!checkAuthRateLimit(clientIp)) {
+    json(res, { error: "Too many attempts. Try again later." }, 429);
+    return false;
+  }
+
   const auth = req.headers["authorization"];
   if (!auth || !auth.startsWith("Bearer ")) {
     json(res, { error: "Unauthorized" }, 401);
     return false;
   }
-  const providedPin = auth.slice(7);
-  // Use timingSafeEqual to prevent timing attacks
-  const pinBuf = Buffer.from(PIN!);
-  const providedBuf = Buffer.from(providedPin);
-  if (
-    pinBuf.length !== providedBuf.length ||
-    !timingSafeEqual(pinBuf, providedBuf)
-  ) {
+  const providedHash = auth.slice(7);
+  const providedBuf = Buffer.from(providedHash, "utf8");
+
+  // Try each device's token, check all to avoid timing side-channel
+  let matched = false;
+  for (const device of devices) {
+    // Skip expired device tokens
+    if (new Date(device.tokenExpiresAt) <= new Date()) continue;
+
+    const expectedHash = computeAuthHash(PIN!, device.token);
+    const expectedBuf = Buffer.from(expectedHash, "utf8");
+    if (
+      providedBuf.length === expectedBuf.length &&
+      timingSafeEqual(providedBuf, expectedBuf)
+    ) {
+      matched = true;
+    }
+  }
+
+  if (!matched) {
     json(res, { error: "Unauthorized" }, 401);
     return false;
   }
@@ -386,7 +424,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   const extraOrigins = (process.env.CORS_ORIGINS || "")
     .split(",")
     .filter(Boolean);
-  const allowedOrigins = [clientUrl, "https://ai.pond.audio", ...extraOrigins];
+  const allowedOrigins = [clientUrl, ...extraOrigins].filter(Boolean);
   const origin = req.headers["origin"];
   if (origin && allowedOrigins.includes(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
@@ -409,17 +447,24 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   // API: Status - limited info without auth, full info with auth
   if (pathname === "/api/status" && method === "GET") {
     reloadState();
-    // Check if caller is authenticated (optional)
+    // Check if caller is authenticated (optional) via device token hash
     const auth = req.headers["authorization"];
     const isAuthed = (() => {
       if (!auth || !auth.startsWith("Bearer ")) return false;
-      const providedPin = auth.slice(7);
-      const pinBuf = Buffer.from(PIN!);
-      const providedBuf = Buffer.from(providedPin);
-      return (
-        pinBuf.length === providedBuf.length &&
-        timingSafeEqual(pinBuf, providedBuf)
-      );
+      const providedHash = auth.slice(7);
+      const providedBuf = Buffer.from(providedHash, "utf8");
+      for (const device of devices) {
+        if (new Date(device.tokenExpiresAt) <= new Date()) continue;
+        const expectedHash = computeAuthHash(PIN!, device.token);
+        const expectedBuf = Buffer.from(expectedHash, "utf8");
+        if (
+          providedBuf.length === expectedBuf.length &&
+          timingSafeEqual(providedBuf, expectedBuf)
+        ) {
+          return true;
+        }
+      }
+      return false;
     })();
 
     const serverName = process.env.SERVER_NAME || hostname();
@@ -427,7 +472,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     if (isAuthed) {
       return json(res, {
         paired: devices.length > 0,
-        devices: devices.map((d) => ({ id: d.id, createdAt: d.createdAt })),
+        devices: devices.map((d) => ({
+          id: d.id,
+          createdAt: d.createdAt,
+          tokenExpiresAt: d.tokenExpiresAt,
+        })),
         deviceCount: devices.length,
         serverName,
         pairingUrl: serverState.pairingToken
@@ -1077,17 +1126,20 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       serverState.privateKey,
       clientPublicKey,
     );
+    const { token: deviceToken, tokenExpiresAt } = generateDeviceToken();
     const newDevice: Device = {
       id: randomBytes(8).toString("hex"),
       publicKey: clientPublicKey,
       sharedSecret,
       createdAt: new Date().toISOString(),
+      token: deviceToken,
+      tokenExpiresAt,
     };
 
     addDevice(newDevice);
     devices = loadDevices();
     console.log(
-      `> New device paired: ${newDevice.id} (total: ${devices.length})`,
+      `> New device paired: ${newDevice.id} (total: ${devices.length}, token expires: ${tokenExpiresAt})`,
     );
 
     // Invalidate token after use (one-time use)
@@ -1098,6 +1150,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     return json(res, {
       serverPublicKey: serverState.publicKey,
       deviceId: newDevice.id,
+      deviceToken,
+      tokenExpiresAt,
     });
   }
 
@@ -1292,6 +1346,18 @@ async function main() {
           });
           return;
         }
+        // Check device token expiry before PIN verification
+        if (new Date(currentDevice.tokenExpiresAt) <= new Date()) {
+          console.log(
+            `Device ${currentDevice.id} token expired (${currentDevice.tokenExpiresAt})`,
+          );
+          sendEncrypted({
+            type: "auth_error",
+            error: "device_expired",
+          });
+          return;
+        }
+
         const valid = await verifyPin(msg.pin || "", pinHash);
         if (valid) {
           authenticated = true;

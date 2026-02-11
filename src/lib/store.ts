@@ -20,6 +20,8 @@ export interface Device {
   publicKey: string;
   sharedSecret: string;
   createdAt: string;
+  token: string;
+  tokenExpiresAt: string;
 }
 
 export interface ServerState {
@@ -70,12 +72,12 @@ export interface WorktreeInfo {
   isWorktree: true;
   parentRepoId: string; // e.g. "remote-claude-real"
   branch: string; // e.g. "feature/dark-mode"
-  mainWorktreePath: string; // e.g. "/home/jamie/projects/remote-claude-real"
+  mainWorktreePath: string; // e.g. "/home/user/projects/my-project"
 }
 
 export interface Project {
   id: string; // folder name e.g. "remote-claude-real"
-  path: string; // full path e.g. "/home/jamie/projects/remote-claude-real"
+  path: string; // full path e.g. "/home/user/projects/my-project"
   name: string; // display name (from package.json or folder)
   lastAccessed?: string;
   worktree?: WorktreeInfo;
