@@ -792,16 +792,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     }
 
     try {
-      const prJson = execSync(
-        "gh pr view --json url,number,title,state",
-        {
-          cwd: project.path,
-          encoding: "utf-8",
-          timeout: 10000,
-        },
-      ).trim();
+      const prJson = execSync("gh pr view --json url,number,title,state", {
+        cwd: project.path,
+        encoding: "utf-8",
+        timeout: 10000,
+      }).trim();
       const pr = JSON.parse(prJson);
-      console.log(`[api] PR info for ${projectId}: #${pr.number} (${pr.state})`);
+      console.log(
+        `[api] PR info for ${projectId}: #${pr.number} (${pr.state})`,
+      );
       return json(res, pr);
     } catch {
       console.log(`[api] No PR found for ${projectId}`);
