@@ -440,15 +440,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   }
 
   // Auth gate: all /api/ routes require PIN auth, except /api/status (limited info without auth)
-  // Also exempt /api/new-pair-token from localhost — if you're on the machine, you're authorized
-  const isLocalhost =
-    req.socket.remoteAddress === "127.0.0.1" ||
-    req.socket.remoteAddress === "::1" ||
-    req.socket.remoteAddress === "::ffff:127.0.0.1";
-  const authExempt =
-    pathname === "/api/status" ||
-    (pathname === "/api/new-pair-token" && isLocalhost);
-  if (pathname?.startsWith("/api/") && !authExempt) {
+  if (pathname?.startsWith("/api/") && pathname !== "/api/status") {
     if (!checkApiAuth(req, res)) return;
   }
 
