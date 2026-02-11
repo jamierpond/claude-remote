@@ -46,12 +46,4 @@ logs/
 dist/
 .direnv/
 
-# Flutter
-flutter_client/.dart_tool/
-flutter_client/.flutter-plugins
-flutter_client/.flutter-plugins-dependencies
-flutter_client/build/
-flutter_client/.packages
-flutter_client/pubspec.lock
-flutter_client/flutter_02.png
 pair-link.txt

@@ -18,6 +18,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "test": "tsx --test src/lib/*.test.ts",
     "knip": "knip",
     "ci:fix": "pnpm lint --fix && pnpm format",
     "logs:server": "tail -f logs/server.log",

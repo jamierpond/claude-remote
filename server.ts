@@ -96,11 +96,19 @@ function checkAuthRateLimit(ip: string): boolean {
   const now = Date.now();
   const entry = authAttempts.get(ip);
   if (!entry || now >= entry.resetAt) {
-    authAttempts.set(ip, { count: 1, resetAt: now + AUTH_WINDOW_MS });
     return true;
   }
-  entry.count++;
-  return entry.count <= AUTH_MAX_ATTEMPTS;
+  return entry.count < AUTH_MAX_ATTEMPTS;
+}
+
+function recordAuthFailure(ip: string): void {
+  const now = Date.now();
+  const entry = authAttempts.get(ip);
+  if (!entry || now >= entry.resetAt) {
+    authAttempts.set(ip, { count: 1, resetAt: now + AUTH_WINDOW_MS });
+  } else {
+    entry.count++;
+  }
 }
 
 // Device token TTL: 6 months
@@ -387,6 +395,7 @@ function checkApiAuth(req: IncomingMessage, res: ServerResponse): boolean {
 
   const auth = req.headers["authorization"];
   if (!auth || !auth.startsWith("Bearer ")) {
+    recordAuthFailure(clientIp);
     json(res, { error: "Unauthorized" }, 401);
     return false;
   }
@@ -410,6 +419,7 @@ function checkApiAuth(req: IncomingMessage, res: ServerResponse): boolean {
   }
 
   if (!matched) {
+    recordAuthFailure(clientIp);
     json(res, { error: "Unauthorized" }, 401);
     return false;
   }
@@ -439,8 +449,17 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     return;
   }
 
-  // Auth gate: all /api/ routes require PIN auth, except /api/status (limited info without auth)
-  if (pathname?.startsWith("/api/") && pathname !== "/api/status") {
+  // Auth gate: all /api/ routes require PIN auth, except:
+  // - /api/status (limited info without auth)
+  // - /api/new-pair-token from localhost (if you're on the machine, you're authorized)
+  const isLocalhost =
+    req.socket.remoteAddress === "127.0.0.1" ||
+    req.socket.remoteAddress === "::1" ||
+    req.socket.remoteAddress === "::ffff:127.0.0.1";
+  const authExempt =
+    pathname === "/api/status" ||
+    (pathname === "/api/new-pair-token" && isLocalhost);
+  if (pathname?.startsWith("/api/") && !authExempt) {
     if (!checkApiAuth(req, res)) return;
   }
 
@@ -1455,6 +1474,7 @@ async function main() {
           }
         } else {
           console.log("Auth failed - invalid PIN");
+          recordAuthFailure(clientIp);
           sendEncrypted({ type: "auth_error", error: "Invalid PIN" });
         }
       } else if (msg.type === "list_projects") {

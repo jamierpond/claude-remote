@@ -2,3 +2,4 @@ node_modules
 dist
 logs
 pnpm-lock.yaml
+flutter_client

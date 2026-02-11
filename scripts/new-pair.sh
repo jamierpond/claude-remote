@@ -1,15 +1,14 @@
 #!/bin/bash
 # Generate a new pairing QR code / link
-# Usage: ./scripts/new-pair.sh <PIN>
+# Must be run on the server machine (localhost auth exempt)
+# Usage: ./scripts/new-pair.sh
 
 set -e
 
-PIN="${1:?Usage: $0 <PIN>}"
 SERVER="http://localhost:6767"
 OUTFILE="pair-link.txt"
 
 RESPONSE=$(curl -s -X POST "$SERVER/api/new-pair-token" \
-  -H "Authorization: Bearer $PIN" \
   -H "Content-Type: application/json")
 
 URL=$(echo "$RESPONSE" | jq -r '.pairingUrl // empty')
