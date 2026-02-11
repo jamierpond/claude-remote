@@ -449,8 +449,17 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     return;
   }
 
-  // Auth gate: all /api/ routes require PIN auth, except /api/status (limited info without auth)
-  if (pathname?.startsWith("/api/") && pathname !== "/api/status") {
+  // Auth gate: all /api/ routes require PIN auth, except:
+  // - /api/status (limited info without auth)
+  // - /api/new-pair-token from localhost (if you're on the machine, you're authorized)
+  const isLocalhost =
+    req.socket.remoteAddress === "127.0.0.1" ||
+    req.socket.remoteAddress === "::1" ||
+    req.socket.remoteAddress === "::ffff:127.0.0.1";
+  const authExempt =
+    pathname === "/api/status" ||
+    (pathname === "/api/new-pair-token" && isLocalhost);
+  if (pathname?.startsWith("/api/") && !authExempt) {
     if (!checkApiAuth(req, res)) return;
   }
 
@@ -1466,6 +1475,7 @@ async function main() {
           }
         } else {
           console.log("Auth failed - invalid PIN");
+          recordAuthFailure(clientIp);
           sendEncrypted({ type: "auth_error", error: "Invalid PIN" });
         }
       } else if (msg.type === "list_projects") {
