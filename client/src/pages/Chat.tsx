@@ -727,19 +727,36 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
           }
         } else if (msg.type === "auth_error") {
           console.error("Auth failed:", msg.error);
-          cachedPinRef.current = null;
-          clearServerPin(serverConfig.id);
-          setIsReconnecting(false);
-          setReconnectAttempt(0);
-          reconnectAttemptRef.current = 0;
 
           if (msg.error === "device_expired") {
+            cachedPinRef.current = null;
+            clearServerPin(serverConfig.id);
+            setIsReconnecting(false);
+            setReconnectAttempt(0);
+            reconnectAttemptRef.current = 0;
             setError(
               "Device authorization has expired. Please re-pair this device.",
             );
             // Redirect to server list after a short delay
             setTimeout(() => onNavigate("servers"), 3000);
+          } else if (
+            msg.error?.includes("Too many attempts") ||
+            msg.error?.includes("rate limit")
+          ) {
+            // Rate limited — don't clear PIN, just retry after a delay
+            console.log("[auth] Rate limited, will retry in 10s...");
+            setError("Rate limited — retrying...");
+            setTimeout(() => {
+              if (cachedPinRef.current) {
+                connectAndAuth();
+              }
+            }, 10_000);
           } else {
+            cachedPinRef.current = null;
+            clearServerPin(serverConfig.id);
+            setIsReconnecting(false);
+            setReconnectAttempt(0);
+            reconnectAttemptRef.current = 0;
             setError(
               msg.error || "Authentication failed - please re-enter PIN",
             );
