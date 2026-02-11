@@ -775,6 +775,39 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     }
   }
 
+  // API: Get PR info for a project's current branch
+  if (
+    pathname?.startsWith("/api/projects/") &&
+    pathname.endsWith("/pr") &&
+    method === "GET"
+  ) {
+    const projectId = decodeURIComponent(
+      pathname.split("/api/projects/")[1].replace("/pr", ""),
+    );
+    if (!validateProjectId(projectId))
+      return json(res, { error: "Invalid project ID" }, 400);
+    const project = getProject(projectId);
+    if (!project) {
+      return json(res, { error: "Project not found" }, 404);
+    }
+
+    try {
+      const prJson = execSync("gh pr view --json url,number,title,state", {
+        cwd: project.path,
+        encoding: "utf-8",
+        timeout: 10000,
+      }).trim();
+      const pr = JSON.parse(prJson);
+      console.log(
+        `[api] PR info for ${projectId}: #${pr.number} (${pr.state})`,
+      );
+      return json(res, pr);
+    } catch {
+      console.log(`[api] No PR found for ${projectId}`);
+      return json(res, { error: "No PR found" }, 404);
+    }
+  }
+
   // API: Worktree management
   if (
     pathname?.startsWith("/api/projects/") &&
