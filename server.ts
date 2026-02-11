@@ -395,6 +395,7 @@ function checkApiAuth(req: IncomingMessage, res: ServerResponse): boolean {
 
   const auth = req.headers["authorization"];
   if (!auth || !auth.startsWith("Bearer ")) {
+    recordAuthFailure(clientIp);
     json(res, { error: "Unauthorized" }, 401);
     return false;
   }
@@ -418,6 +419,7 @@ function checkApiAuth(req: IncomingMessage, res: ServerResponse): boolean {
   }
 
   if (!matched) {
+    recordAuthFailure(clientIp);
     json(res, { error: "Unauthorized" }, 401);
     return false;
   }
