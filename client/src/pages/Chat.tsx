@@ -22,7 +22,6 @@ import {
   getServerPin,
   setServerPin,
   clearServerPin,
-  getServers,
 } from "../lib/servers";
 import {
   registerServiceWorker,

@@ -111,10 +111,6 @@ All communication between your phone and the server is encrypted with a shared s
 - **Security**: ECDH key exchange, AES-256-GCM encryption, argon2 PIN hashing
 - **Claude**: Spawns `claude` CLI with `--output-format stream-json`
 
-## Security
-
-See [SEC_AUDIT.md](./SEC_AUDIT.md) for a full security audit including known attack vectors and mitigations.
-
 ## License
 
 [MIT](./LICENSE)
