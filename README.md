@@ -7,6 +7,10 @@ A secure, mobile-first web interface for accessing [Claude Code](https://docs.an
 
 Run Claude Code on your desktop or server, control it from anywhere over an encrypted connection.
 
+<p align="center">
+  <img src="docs/claude-remote.jpeg" alt="Claude Remote — mobile chat interface" width="350" />
+</p>
+
 ## Features
 
 - **End-to-end encryption** — ECDH P-256 key exchange + AES-256-GCM per message
