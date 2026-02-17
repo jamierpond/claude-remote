@@ -1,8 +1,7 @@
-.PHONY: dev build deploy start stop restart status logs logs-client deps docker-up docker-down docker-logs docker-deploy free-ports
+.PHONY: dev build deploy start stop restart status logs logs-client deps docker-up docker-down docker-logs docker-deploy free-ports _kill_server _wait_port_free
 
 SERVICE := claude-remote.service
 LOGFILE := logs/daemon-server.log
-PIDFILE := logs/server.pid
 UNAME := $(shell uname)
 
 # Install dependencies
@@ -23,22 +22,13 @@ build:
 ifeq ($(UNAME),Darwin)
 # --- macOS: PID-file based process management ---
 
-deploy: build
+deploy: build _kill_server _wait_port_free
 	@mkdir -p logs
-	@# Stop existing server if running
-	@if [ -f $(PIDFILE) ] && kill -0 $$(cat $(PIDFILE)) 2>/dev/null; then \
-		echo "Stopping existing server (PID $$(cat $(PIDFILE)))..."; \
-		kill $$(cat $(PIDFILE)) 2>/dev/null; \
-		sleep 1; \
-	fi
-	@# Also kill anything on port 6767 in case of stale processes
-	@lsof -ti :6767 | xargs kill 2>/dev/null || true
-	@sleep 1
 	@echo "Starting server..."
-	@NODE_ENV=production nohup pnpm tsx server.ts >> $(LOGFILE) 2>&1 & echo $$! > $(PIDFILE)
+	@NODE_ENV=production nohup pnpm tsx server.ts >> $(LOGFILE) 2>&1 &
 	@sleep 2
-	@if [ -f $(PIDFILE) ] && kill -0 $$(cat $(PIDFILE)) 2>/dev/null; then \
-		echo "Server (:6767) running (PID $$(cat $(PIDFILE)))."; \
+	@if lsof -ti :6767 > /dev/null 2>&1; then \
+		echo "Server (:6767) running (PID $$(lsof -ti :6767 | head -1))."; \
 	else \
 		echo "ERROR: server failed to start. Check logs:"; \
 		tail -20 $(LOGFILE); \
@@ -46,33 +36,35 @@ deploy: build
 	fi
 	@echo "Deployed."
 
-start:
+start: _wait_port_free
 	@mkdir -p logs
-	@if [ -f $(PIDFILE) ] && kill -0 $$(cat $(PIDFILE)) 2>/dev/null; then \
-		echo "Server already running (PID $$(cat $(PIDFILE)))."; \
-	else \
-		NODE_ENV=production nohup pnpm tsx server.ts >> $(LOGFILE) 2>&1 & echo $$! > $(PIDFILE); \
-		echo "Server started (PID $$(cat $(PIDFILE)))."; \
-	fi
+	@NODE_ENV=production nohup pnpm tsx server.ts >> $(LOGFILE) 2>&1 &
+	@sleep 2
+	@echo "Server started."
 
-stop:
-	@if [ -f $(PIDFILE) ] && kill -0 $$(cat $(PIDFILE)) 2>/dev/null; then \
-		kill $$(cat $(PIDFILE)); \
-		rm -f $(PIDFILE); \
-		echo "Server stopped."; \
-	else \
-		echo "Server not running."; \
-		rm -f $(PIDFILE); \
-	fi
+stop: _kill_server
 
-restart: stop start
+restart: _kill_server _wait_port_free start
 
 status:
-	@if [ -f $(PIDFILE) ] && kill -0 $$(cat $(PIDFILE)) 2>/dev/null; then \
-		echo "Server running (PID $$(cat $(PIDFILE)))."; \
+	@if lsof -ti :6767 > /dev/null 2>&1; then \
+		echo "Server running (PID $$(lsof -ti :6767 | head -1))."; \
 	else \
 		echo "Server not running."; \
 	fi
+
+_kill_server:
+	@if lsof -ti :6767 > /dev/null 2>&1; then \
+		echo "Stopping server on :6767..."; \
+		lsof -ti :6767 | xargs kill -9 2>/dev/null || true; \
+	fi
+
+_wait_port_free:
+	@for i in 1 2 3 4 5 6 7 8 9 10; do \
+		if ! lsof -ti :6767 > /dev/null 2>&1; then break; fi; \
+		if [ $$i -eq 10 ]; then echo "ERROR: port 6767 still in use after 5s"; exit 1; fi; \
+		sleep 0.5; \
+	done
 
 else
 # --- Linux: systemd ---
