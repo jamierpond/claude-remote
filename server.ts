@@ -1478,13 +1478,27 @@ async function main() {
           sendEncrypted({ type: "auth_error", error: "Invalid PIN" });
         }
       } else if (msg.type === "list_projects") {
-        // List available projects
+        if (!authenticated) {
+          sendEncrypted({ type: "error", error: "Not authenticated" });
+          return;
+        }
         const projects = listProjects();
         sendEncrypted({ type: "projects_list", projects });
       } else if (msg.type === "message") {
         if (!authenticated) {
           console.log("Message rejected - not authenticated");
           sendEncrypted({ type: "error", error: "Not authenticated" });
+          return;
+        }
+
+        // Re-check token expiry on every message (not just auth)
+        if (new Date(currentDevice.tokenExpiresAt) <= new Date()) {
+          console.log(
+            `Device ${currentDevice.id} token expired mid-session (${currentDevice.tokenExpiresAt})`,
+          );
+          authenticated = false;
+          sendEncrypted({ type: "auth_error", error: "device_expired" });
+          ws.close(4005, "Token expired");
           return;
         }
 

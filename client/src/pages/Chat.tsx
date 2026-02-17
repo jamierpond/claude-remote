@@ -733,6 +733,12 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
             setIsReconnecting(false);
             setReconnectAttempt(0);
             reconnectAttemptRef.current = 0;
+            // Close the WebSocket immediately to prevent any further communication
+            intentionalCloseRef.current = true;
+            if (wsRef.current) {
+              wsRef.current.close();
+              wsRef.current = null;
+            }
             setError(
               "Device authorization has expired. Please re-pair this device.",
             );
