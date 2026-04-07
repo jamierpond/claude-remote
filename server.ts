@@ -4,7 +4,7 @@ config({ path: ".env.local" });
 import { createServer, IncomingMessage, ServerResponse } from "http";
 import { parse } from "url";
 import { WebSocketServer, WebSocket } from "ws";
-import { randomBytes, timingSafeEqual, createHash } from "crypto";
+import { randomBytes, timingSafeEqual } from "crypto";
 import {
   readFileSync,
   existsSync,
@@ -14,31 +14,14 @@ import {
   statSync,
 } from "fs";
 import { execSync } from "child_process";
-import { homedir, hostname } from "os";
-import qrcode from "qrcode-terminal";
+import { hostname, homedir } from "os";
 import { join, resolve } from "path";
 import {
-  generateKeyPair,
-  deriveSharedSecret,
-  encrypt,
-  decrypt,
-  EncryptedData,
-} from "./src/lib/crypto";
-import {
-  loadDevices,
-  addDevice,
-  removeDevice,
-  loadServerState,
-  saveServerState,
-  verifyPin,
-  hashPin,
   loadConversation,
   addMessage,
   clearConversation,
   getClaudeSessionId,
   saveClaudeSessionId,
-  Device,
-  ServerState,
   Message,
   ToolActivity,
   OutputChunk,
@@ -65,10 +48,10 @@ import {
   sendPushToAll,
 } from "./src/lib/push";
 
-// Track active Claude processes per device per project
-// Key format: `${deviceId}:${projectId}` or just `${deviceId}` for legacy
+// Track active Claude processes per connection per project
+// Key format: `${connId}:${projectId}` or just `${connId}` for legacy
 const activeJobs: Map<string, AbortController> = new Map();
-// Track connected WebSockets per device
+// Track connected WebSockets by connection ID
 const connectedClients: Map<string, WebSocket> = new Map();
 // Track which projects have already sent the "rejoined" context note this server boot
 const rejoinNoteSent: Set<string> = new Set();
@@ -87,7 +70,48 @@ interface PendingQuestion {
 }
 const pendingQuestions: Map<string, PendingQuestion> = new Map();
 
-// Rate limiting for auth attempts per IP
+// --- Session-based auth ---
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const sessions: Map<string, { createdAt: number }> = new Map();
+
+function createSession(): string {
+  const token = randomBytes(32).toString("hex");
+  sessions.set(token, { createdAt: Date.now() });
+  return token;
+}
+
+function validateSession(token: string): boolean {
+  const session = sessions.get(token);
+  if (!session) return false;
+  if (Date.now() - session.createdAt > SESSION_TTL_MS) {
+    sessions.delete(token);
+    return false;
+  }
+  return true;
+}
+
+function parseCookies(req: IncomingMessage): Record<string, string> {
+  const cookies: Record<string, string> = {};
+  const header = req.headers.cookie;
+  if (!header) return cookies;
+  for (const pair of header.split(";")) {
+    const [key, ...rest] = pair.trim().split("=");
+    if (key) cookies[key] = rest.join("=");
+  }
+  return cookies;
+}
+
+function getSessionFromRequest(req: IncomingMessage): string | null {
+  const cookies = parseCookies(req);
+  return cookies["session"] || null;
+}
+
+function isRequestAuthenticated(req: IncomingMessage): boolean {
+  const token = getSessionFromRequest(req);
+  return token ? validateSession(token) : false;
+}
+
+// Rate limiting for login attempts per IP
 const AUTH_MAX_ATTEMPTS = 5;
 const AUTH_WINDOW_MS = 60_000; // 1 minute
 const authAttempts: Map<string, { count: number; resetAt: number }> = new Map();
@@ -111,128 +135,46 @@ function recordAuthFailure(ip: string): void {
   }
 }
 
-// Device token TTL: 6 months
-const DEVICE_TOKEN_TTL_MS = 6 * 30 * 24 * 60 * 60 * 1000;
-
-function generateDeviceToken(): { token: string; tokenExpiresAt: string } {
-  return {
-    token: randomBytes(32).toString("hex"),
-    tokenExpiresAt: new Date(Date.now() + DEVICE_TOKEN_TTL_MS).toISOString(),
-  };
-}
-
-function computeAuthHash(pin: string, deviceToken: string): string {
-  return createHash("sha256")
-    .update(pin + deviceToken)
-    .digest("hex");
+function verifyPassword(input: string): boolean {
+  const expected = Buffer.from(PIN!);
+  const provided = Buffer.from(input);
+  if (expected.length !== provided.length) return false;
+  return timingSafeEqual(expected, provided);
 }
 
 // Broadcast reload message to all connected clients (for dev hot reload)
 function broadcastReload() {
   console.log("[dev] Broadcasting reload to", connectedClients.size, "clients");
-  const devices = loadDevices();
-  for (const [deviceId, ws] of connectedClients.entries()) {
+  for (const [connId, ws] of connectedClients.entries()) {
     if (ws.readyState === WebSocket.OPEN) {
-      const device = devices.find((d) => d.id === deviceId);
-      if (device) {
-        const encrypted = encrypt(
-          JSON.stringify({ type: "reload" }),
-          device.sharedSecret,
-        );
-        ws.send(JSON.stringify(encrypted));
-        console.log(`[dev] Sent reload to device ${deviceId}`);
-      }
+      ws.send(JSON.stringify({ type: "reload" }));
+      console.log(`[dev] Sent reload to connection ${connId}`);
     }
   }
 }
 
 // Broadcast an event to all connected clients except the sender
-function broadcastToOthers(excludeDeviceId: string, event: object) {
-  for (const [connDeviceId, connWs] of connectedClients.entries()) {
-    if (connDeviceId === excludeDeviceId) continue;
+function broadcastToOthers(excludeConnId: string, event: object) {
+  const msg = JSON.stringify(event);
+  for (const [connId, connWs] of connectedClients.entries()) {
+    if (connId === excludeConnId) continue;
     if (connWs.readyState !== WebSocket.OPEN) continue;
-    const connDevice = devices.find((d) => d.id === connDeviceId);
-    if (connDevice) {
-      const encrypted = encrypt(JSON.stringify(event), connDevice.sharedSecret);
-      connWs.send(JSON.stringify(encrypted));
-    }
+    connWs.send(msg);
   }
 }
 
 // Helper to create job key
-function jobKey(deviceId: string, projectId?: string): string {
-  return projectId ? `${deviceId}:${projectId}` : deviceId;
+function jobKey(connId: string, projectId?: string): string {
+  return projectId ? `${connId}:${projectId}` : connId;
 }
 
 // Events file path
 const configDir = join(homedir(), ".config", "claude-remote");
 const eventsFile = join(configDir, "events.jsonl");
 
-function appendEvent(deviceId: string, event: ClaudeEvent) {
-  const line = JSON.stringify({ deviceId, event, ts: Date.now() }) + "\n";
+function appendEvent(connId: string, event: ClaudeEvent) {
+  const line = JSON.stringify({ connId, event, ts: Date.now() }) + "\n";
   appendFileSync(eventsFile, line);
-}
-
-// Persist last flushed timestamp per device to disk
-const lastFlushedFile = join(configDir, "last-flushed.json");
-
-function loadLastFlushedTs(): Record<string, number> {
-  try {
-    if (!existsSync(lastFlushedFile)) return {};
-    return JSON.parse(readFileSync(lastFlushedFile, "utf-8"));
-  } catch {
-    return {};
-  }
-}
-
-function saveLastFlushedTs(deviceId: string, ts: number) {
-  const data = loadLastFlushedTs();
-  data[deviceId] = ts;
-  writeFileSync(lastFlushedFile, JSON.stringify(data, null, 2));
-}
-
-function loadPendingEvents(deviceId: string): ClaudeEvent[] {
-  if (!existsSync(eventsFile)) return [];
-  const lines = readFileSync(eventsFile, "utf-8")
-    .trim()
-    .split("\n")
-    .filter(Boolean);
-  const events: ClaudeEvent[] = [];
-  const lastTs = loadLastFlushedTs()[deviceId] || 0;
-  let maxTs = lastTs;
-  for (const line of lines) {
-    try {
-      const { deviceId: did, event, ts } = JSON.parse(line);
-      if (did === deviceId && ts > lastTs) {
-        events.push(event);
-        if (ts > maxTs) maxTs = ts;
-      }
-    } catch {
-      // skip malformed event lines
-    }
-  }
-  if (maxTs > lastTs) saveLastFlushedTs(deviceId, maxTs);
-  return events;
-}
-
-function _clearPendingEvents(deviceId: string) {
-  if (!existsSync(eventsFile)) return;
-  const lines = readFileSync(eventsFile, "utf-8")
-    .trim()
-    .split("\n")
-    .filter(Boolean);
-  const remaining = lines.filter((line) => {
-    try {
-      const { deviceId: did } = JSON.parse(line);
-      return did !== deviceId;
-    } catch {
-      return true;
-    }
-  });
-  writeFileSync(
-    eventsFile,
-    remaining.join("\n") + (remaining.length ? "\n" : ""),
-  );
 }
 
 // Partial response persistence (survives crashes)
@@ -272,12 +214,12 @@ function flushPartialResponses() {
 }
 
 function savePartialResponse(
-  deviceId: string,
+  key: string,
   text: string,
   thinking: string,
   activity: ToolActivity[] = [],
 ) {
-  pendingPartials.set(deviceId, { text, thinking, activity });
+  pendingPartials.set(key, { text, thinking, activity });
   if (!partialSaveTimer) {
     partialSaveTimer = setTimeout(() => {
       partialSaveTimer = null;
@@ -286,20 +228,17 @@ function savePartialResponse(
   }
 }
 
-function clearPartialResponse(deviceId: string) {
+function clearPartialResponse(key: string) {
   const data = loadPartialResponses();
-  delete data[deviceId];
+  delete data[key];
   writeFileSync(partialResponseFile, JSON.stringify(data, null, 2));
 }
 
 function recoverPartialResponses() {
-  // On startup, check for partial responses and save them as messages
   const partials = loadPartialResponses();
-  for (const [deviceId, partial] of Object.entries(partials)) {
+  for (const [key, partial] of Object.entries(partials)) {
     if (partial.text || partial.thinking || partial.activity.length > 0) {
-      console.log(
-        `[recovery] Found partial response for device ${deviceId}, saving...`,
-      );
+      console.log(`[recovery] Found partial response for ${key}, saving...`);
       addMessage({
         role: "assistant",
         content: partial.text + "\n\n[Response interrupted - server restarted]",
@@ -309,7 +248,6 @@ function recoverPartialResponses() {
       });
     }
   }
-  // Clear all partials after recovery
   writeFileSync(partialResponseFile, "{}");
 }
 
@@ -323,53 +261,6 @@ if (!PIN) {
   process.exit(1);
 }
 
-let pinHash: string;
-let serverState: ServerState;
-let devices: Device[] = [];
-
-function initializeServer() {
-  devices = loadDevices();
-  const existingState = loadServerState();
-
-  if (existingState) {
-    // Always keep pairing token active for multi-device support
-    if (!existingState.pairingToken) {
-      existingState.pairingToken = randomBytes(16).toString("hex");
-    }
-    serverState = existingState;
-  } else {
-    const keyPair = generateKeyPair();
-    serverState = {
-      privateKey: keyPair.privateKey,
-      publicKey: keyPair.publicKey,
-      pairingToken: randomBytes(16).toString("hex"),
-    };
-  }
-  saveServerState(serverState);
-}
-
-function reloadState() {
-  devices = loadDevices();
-  const existingState = loadServerState();
-  if (existingState) {
-    serverState = existingState;
-  }
-}
-
-// Try all devices to avoid timing side-channel leaking which device index matched
-function findDeviceByDecryption(encrypted: EncryptedData): Device | null {
-  let matched: Device | null = null;
-  for (const device of devices) {
-    try {
-      decrypt(encrypted, device.sharedSecret);
-      matched = device;
-    } catch {
-      // Try next device
-    }
-  }
-  return matched;
-}
-
 function json(res: ServerResponse, data: object, status = 200) {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(data));
@@ -381,45 +272,9 @@ async function readBody(req: IncomingMessage): Promise<string> {
   return body;
 }
 
-// API authentication: validate SHA-256(PIN + deviceToken) with rate limiting
+// API authentication: validate session cookie
 function checkApiAuth(req: IncomingMessage, res: ServerResponse): boolean {
-  const clientIp =
-    req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim() ||
-    req.socket.remoteAddress ||
-    "unknown";
-
-  if (!checkAuthRateLimit(clientIp)) {
-    json(res, { error: "Too many attempts. Try again later." }, 429);
-    return false;
-  }
-
-  const auth = req.headers["authorization"];
-  if (!auth || !auth.startsWith("Bearer ")) {
-    recordAuthFailure(clientIp);
-    json(res, { error: "Unauthorized" }, 401);
-    return false;
-  }
-  const providedHash = auth.slice(7);
-  const providedBuf = Buffer.from(providedHash, "utf8");
-
-  // Try each device's token, check all to avoid timing side-channel
-  let matched = false;
-  for (const device of devices) {
-    // Skip expired device tokens
-    if (new Date(device.tokenExpiresAt) <= new Date()) continue;
-
-    const expectedHash = computeAuthHash(PIN!, device.token);
-    const expectedBuf = Buffer.from(expectedHash, "utf8");
-    if (
-      providedBuf.length === expectedBuf.length &&
-      timingSafeEqual(providedBuf, expectedBuf)
-    ) {
-      matched = true;
-    }
-  }
-
-  if (!matched) {
-    recordAuthFailure(clientIp);
+  if (!isRequestAuthenticated(req)) {
     json(res, { error: "Unauthorized" }, 401);
     return false;
   }
@@ -439,9 +294,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   if (origin && allowedOrigins.includes(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
   }
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
   if (method === "OPTIONS") {
     res.writeHead(204);
@@ -449,82 +305,56 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     return;
   }
 
-  // Auth gate: all /api/ routes require PIN auth, except:
-  // - /api/status (limited info without auth)
-  // - /api/new-pair-token from localhost (if you're on the machine, you're authorized)
-  const isLocalhost =
-    req.socket.remoteAddress === "127.0.0.1" ||
-    req.socket.remoteAddress === "::1" ||
-    req.socket.remoteAddress === "::ffff:127.0.0.1";
+  // Auth gate: all /api/ routes require session cookie, except:
+  // - /api/status (public info)
+  // - /api/login (the login endpoint itself)
   const authExempt =
-    pathname === "/api/status" ||
-    (pathname === "/api/new-pair-token" && isLocalhost);
+    pathname === "/api/status" || pathname === "/api/login";
   if (pathname?.startsWith("/api/") && !authExempt) {
     if (!checkApiAuth(req, res)) return;
   }
 
-  // API: Status - limited info without auth, full info with auth
-  if (pathname === "/api/status" && method === "GET") {
-    reloadState();
-    // Check if caller is authenticated (optional) via device token hash
-    const auth = req.headers["authorization"];
-    const isAuthed = (() => {
-      if (!auth || !auth.startsWith("Bearer ")) return false;
-      const providedHash = auth.slice(7);
-      const providedBuf = Buffer.from(providedHash, "utf8");
-      for (const device of devices) {
-        if (new Date(device.tokenExpiresAt) <= new Date()) continue;
-        const expectedHash = computeAuthHash(PIN!, device.token);
-        const expectedBuf = Buffer.from(expectedHash, "utf8");
-        if (
-          providedBuf.length === expectedBuf.length &&
-          timingSafeEqual(providedBuf, expectedBuf)
-        ) {
-          return true;
-        }
-      }
-      return false;
-    })();
+  // API: Login — validate password, set session cookie
+  if (pathname === "/api/login" && method === "POST") {
+    const clientIp =
+      req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim() ||
+      req.socket.remoteAddress ||
+      "unknown";
 
-    const serverName = process.env.SERVER_NAME || hostname();
-
-    if (isAuthed) {
-      return json(res, {
-        paired: devices.length > 0,
-        devices: devices.map((d) => ({
-          id: d.id,
-          createdAt: d.createdAt,
-          tokenExpiresAt: d.tokenExpiresAt,
-        })),
-        deviceCount: devices.length,
-        serverName,
-        pairingUrl: serverState.pairingToken
-          ? `${clientUrl}/pair?server=${encodeURIComponent(serverUrl)}&token=${serverState.pairingToken}`
-          : null,
-      });
+    if (!checkAuthRateLimit(clientIp)) {
+      return json(res, { error: "Too many attempts. Try again later." }, 429);
     }
 
-    // Unauthenticated: limited info only
-    return json(res, {
-      paired: devices.length > 0,
-      deviceCount: devices.length,
-      serverName,
-    });
+    const body = await readBody(req);
+    let password: string;
+    try {
+      password = JSON.parse(body).password;
+    } catch {
+      return json(res, { error: "Invalid request body" }, 400);
+    }
+
+    if (!password || !verifyPassword(password)) {
+      recordAuthFailure(clientIp);
+      return json(res, { error: "Invalid password" }, 401);
+    }
+
+    const sessionToken = createSession();
+    res.setHeader(
+      "Set-Cookie",
+      `session=${sessionToken}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`,
+    );
+    return json(res, { ok: true });
   }
 
-  // API: Generate new pairing token (invalidates previous one)
-  if (pathname === "/api/new-pair-token" && method === "POST") {
-    reloadState();
-    serverState.pairingToken = randomBytes(16).toString("hex");
-    saveServerState(serverState);
-    const pairUrl = `${clientUrl}/pair?server=${encodeURIComponent(serverUrl)}&token=${serverState.pairingToken}`;
-    console.log(`> New pairing token generated`);
-    console.log(`> URL: ${pairUrl}`);
-    console.log("");
-    qrcode.generate(pairUrl, { small: true });
+  // API: Status
+  if (pathname === "/api/status" && method === "GET") {
+    const isAuthed = isRequestAuthenticated(req);
+    const serverName = process.env.SERVER_NAME || hostname();
+
     return json(res, {
-      pairingUrl: pairUrl,
-      token: serverState.pairingToken,
+      serverName,
+      authenticated: isAuthed,
+      connections: connectedClients.size,
     });
   }
 
@@ -1143,103 +973,6 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     return json(res, { ok: true });
   }
 
-  // API: Pair GET - get server public key
-  if (pathname?.startsWith("/pair/") && method === "GET") {
-    reloadState();
-    const token = pathname.split("/pair/")[1];
-
-    if (!serverState || serverState.pairingToken !== token) {
-      return json(res, { error: "Invalid token" }, 400);
-    }
-
-    return json(res, { serverPublicKey: serverState.publicKey });
-  }
-
-  // API: Pair POST - complete pairing (allows multiple devices)
-  if (pathname?.startsWith("/pair/") && method === "POST") {
-    reloadState();
-    const token = pathname.split("/pair/")[1];
-
-    if (!serverState || serverState.pairingToken !== token) {
-      return json(res, { error: "Invalid token" }, 400);
-    }
-
-    let body = "";
-    for await (const chunk of req) {
-      body += chunk;
-    }
-
-    const { clientPublicKey } = JSON.parse(body);
-    if (!clientPublicKey) {
-      return json(res, { error: "Missing clientPublicKey" }, 400);
-    }
-
-    const sharedSecret = deriveSharedSecret(
-      serverState.privateKey,
-      clientPublicKey,
-    );
-    const { token: deviceToken, tokenExpiresAt } = generateDeviceToken();
-    const newDevice: Device = {
-      id: randomBytes(8).toString("hex"),
-      publicKey: clientPublicKey,
-      sharedSecret,
-      createdAt: new Date().toISOString(),
-      token: deviceToken,
-      tokenExpiresAt,
-    };
-
-    addDevice(newDevice);
-    devices = loadDevices();
-    console.log(
-      `> New device paired: ${newDevice.id} (total: ${devices.length}, token expires: ${tokenExpiresAt})`,
-    );
-
-    // Invalidate token after use (one-time use)
-    serverState.pairingToken = null;
-    saveServerState(serverState);
-    console.log("> Pairing token invalidated (one-time use)");
-
-    return json(res, {
-      serverPublicKey: serverState.publicKey,
-      deviceId: newDevice.id,
-      deviceToken,
-      tokenExpiresAt,
-    });
-  }
-
-  // API: Unpair specific device or all devices
-  if (pathname === "/api/unpair" && method === "POST") {
-    let body = "";
-    for await (const chunk of req) {
-      body += chunk;
-    }
-
-    let deviceId: string | null = null;
-    try {
-      const parsed = JSON.parse(body);
-      deviceId = parsed.deviceId || null;
-    } catch {
-      // No body or invalid JSON - unpair all
-    }
-
-    if (deviceId) {
-      // Remove specific device
-      removeDevice(deviceId);
-      console.log(`> Device ${deviceId} unpaired`);
-    } else {
-      // Remove all devices
-      const { writeFileSync } = await import("fs");
-      const { join } = await import("path");
-      const { homedir } = await import("os");
-      const configDir = join(homedir(), ".config", "claude-remote");
-      writeFileSync(join(configDir, "devices.json"), "[]");
-      console.log("> All devices unpaired");
-    }
-
-    reloadState();
-    return json(res, { success: true, deviceCount: devices.length });
-  }
-
   // Static files (production)
   const distPath = join(process.cwd(), "dist", "client");
   if (existsSync(distPath)) {
@@ -1281,9 +1014,184 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   res.end("Not Found");
 }
 
+// Helper: broadcast a Claude event to all connected clients as plain JSON
+function broadcastEvent(event: object, fallbackConnId?: string) {
+  const eventJson = JSON.stringify(event);
+  let sentToAny = false;
+  for (const [, connWs] of connectedClients.entries()) {
+    if (connWs.readyState === WebSocket.OPEN) {
+      connWs.send(eventJson);
+      sentToAny = true;
+    }
+  }
+  if (!sentToAny && fallbackConnId) {
+    appendEvent(fallbackConnId, event as ClaudeEvent);
+    console.log(`[${fallbackConnId}] Event written to disk (no clients connected)`);
+  }
+}
+
+// Helper: handle a Claude event callback (shared between message and tool_answer flows)
+function makeClaudeEventHandler(opts: {
+  connId: string;
+  projectId?: string;
+  jKey: string;
+  userText: string;
+  state: {
+    thinking: string;
+    text: string;
+    activity: ToolActivity[];
+    chunks: OutputChunk[];
+    lastToolName: string | null;
+    currentChunkText: string;
+    taskStartedAt: string;
+  };
+}) {
+  const { connId, projectId, jKey, userText, state } = opts;
+
+  const isNewChunkStart = (text: string): boolean => {
+    const trimmed = text.trim();
+    if (state.lastToolName !== null) return true;
+    if (text.startsWith("\n\n")) return true;
+    if (
+      /^(Now|Next|Let me|I'll|First|Finally|Done|After|Moving|Continuing|Great|Perfect|Looking|Based on|The |This |I |Here)/i.test(
+        trimmed,
+      )
+    )
+      return true;
+    return false;
+  };
+
+  const flushChunk = (afterTool?: string) => {
+    if (state.currentChunkText.trim()) {
+      state.chunks.push({
+        text: state.currentChunkText.trim(),
+        timestamp: Date.now(),
+        afterTool,
+      });
+      state.currentChunkText = "";
+    }
+  };
+
+  return (event: ClaudeEvent) => {
+    console.log(
+      "[ws] Claude event:",
+      event.type,
+      event.sessionId ? `sessionId=${event.sessionId}` : "",
+      projectId ? `[project: ${projectId}]` : "",
+    );
+
+    if (event.type === "session_init" && event.sessionId) {
+      console.log(
+        "[ws] Saving session ID:",
+        event.sessionId,
+        projectId ? `[project: ${projectId}]` : "",
+      );
+      if (projectId) {
+        saveProjectSessionId(projectId, event.sessionId);
+      } else {
+        saveClaudeSessionId(event.sessionId);
+      }
+      return;
+    }
+
+    let transformedEvent: object = event;
+    if (event.type === "error" && event.text && !("error" in event)) {
+      transformedEvent = { ...event, error: event.text };
+    }
+
+    const eventWithProject = projectId
+      ? { ...transformedEvent, projectId }
+      : transformedEvent;
+
+    broadcastEvent(eventWithProject, connId);
+
+    if (event.type === "thinking" && event.text) {
+      state.thinking += event.text;
+      savePartialResponse(jKey, state.text, state.thinking, state.activity);
+    } else if (event.type === "text" && event.text) {
+      if (isNewChunkStart(event.text) && state.currentChunkText.trim()) {
+        flushChunk(state.lastToolName || undefined);
+        state.lastToolName = null;
+      }
+      state.currentChunkText += event.text;
+      state.text += event.text;
+      savePartialResponse(jKey, state.text, state.thinking, state.activity);
+    } else if (event.type === "tool_use" && event.toolUse) {
+      flushChunk();
+      state.lastToolName = event.toolUse.tool;
+      state.activity.push({
+        type: "tool_use",
+        tool: event.toolUse.tool,
+        id: event.toolUse.id,
+        input: event.toolUse.input,
+        timestamp: Date.now(),
+      });
+      savePartialResponse(jKey, state.text, state.thinking, state.activity);
+
+      if (event.toolUse.tool === "AskUserQuestion" && event.toolUse.id) {
+        const currentSessionId = projectId
+          ? getProjectSessionId(projectId)
+          : getClaudeSessionId();
+        pendingQuestions.set(jKey, {
+          toolUseId: event.toolUse.id,
+          questions: (event.toolUse.input.questions ||
+            []) as PendingQuestion["questions"],
+          projectId,
+          sessionId: currentSessionId || "",
+        });
+        console.log(`[${connId}] AskUserQuestion detected, stored pending question`);
+        const questionText =
+          (event.toolUse.input.questions as Array<{ question: string }>)?.[0]
+            ?.question || "Claude has a question";
+        sendPushToAll("Question from Claude", questionText, "/").catch((err) =>
+          console.error("[push] Failed to send AskUserQuestion push:", err),
+        );
+      }
+    } else if (event.type === "tool_result" && event.toolResult) {
+      state.activity.push({
+        type: "tool_result",
+        tool: event.toolResult.tool,
+        output: event.toolResult.output,
+        error: event.toolResult.error,
+        timestamp: Date.now(),
+      });
+      savePartialResponse(jKey, state.text, state.thinking, state.activity);
+    } else if (event.type === "done") {
+      flushChunk(state.lastToolName || undefined);
+
+      if (state.text || state.thinking || state.activity.length > 0) {
+        const assistantMsg: Message = {
+          role: "assistant",
+          content: state.text,
+          task: userText,
+          chunks: state.chunks.length > 0 ? state.chunks : undefined,
+          thinking: state.thinking || undefined,
+          activity: state.activity.length > 0 ? state.activity : undefined,
+          startedAt: state.taskStartedAt,
+          completedAt: new Date().toISOString(),
+          timestamp: new Date().toISOString(),
+        };
+        if (projectId) {
+          addProjectMessage(projectId, assistantMsg);
+        } else {
+          addMessage(assistantMsg);
+        }
+      }
+      const snippet = state.text.slice(0, 100) || "Task finished";
+      sendPushToAll("Task complete", snippet, "/").catch((err) =>
+        console.error("[push] Failed to send done push:", err),
+      );
+      pendingPartials.delete(jKey);
+      clearPartialResponse(jKey);
+      activeJobs.delete(jKey);
+      console.log(
+        `[${connId}] Job complete for ${projectId || "global"}, cleared from active jobs`,
+      );
+    }
+  };
+}
+
 async function main() {
-  pinHash = await hashPin(PIN!);
-  initializeServer();
   recoverPartialResponses();
   initVapid();
 
@@ -1303,191 +1211,135 @@ async function main() {
   });
 
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
-    let authenticated = false;
-    let currentDevice: Device | null = null;
+    const connId = randomBytes(8).toString("hex");
+    // Check if already authenticated via session cookie on upgrade
+    let authenticated = isRequestAuthenticated(req);
     const clientIp =
       req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim() ||
       req.socket.remoteAddress ||
       "unknown";
 
-    const sendEncrypted = (data: object) => {
-      if (!currentDevice) return;
+    const sendJson = (data: object) => {
       if (ws.readyState !== WebSocket.OPEN) {
-        // Write to disk for later
-        appendEvent(currentDevice.id, data as ClaudeEvent);
-        console.log(
-          `[${currentDevice.id}] Event written to disk (ws not open)`,
-        );
+        appendEvent(connId, data as ClaudeEvent);
+        console.log(`[${connId}] Event written to disk (ws not open)`);
         return;
       }
-      const encrypted = encrypt(
-        JSON.stringify(data),
-        currentDevice.sharedSecret,
-      );
-      ws.send(JSON.stringify(encrypted));
+      ws.send(JSON.stringify(data));
     };
 
-    ws.on("message", async (raw: Buffer) => {
-      reloadState();
-      if (devices.length === 0) {
-        ws.close(4001, "No devices paired");
-        return;
-      }
+    if (authenticated) {
+      connectedClients.set(connId, ws);
+      console.log(`[${connId}] Authenticated via cookie on connect`);
 
-      let encrypted: EncryptedData;
-      try {
-        encrypted = JSON.parse(raw.toString());
-      } catch (err) {
-        console.error("FATAL: Failed to parse WebSocket message as JSON:", err);
-        console.error("Raw message:", raw.toString().substring(0, 200));
-        ws.close(4002, "Invalid JSON");
-        return;
-      }
-
-      // Find device by trying decryption with each device's key
-      if (!currentDevice) {
-        currentDevice = findDeviceByDecryption(encrypted);
-        if (currentDevice) {
-          console.log(`Device identified: ${currentDevice.id}`);
+      // Find all active jobs (across all projects)
+      const activeProjectIds: string[] = [];
+      for (const key of activeJobs.keys()) {
+        const colonIdx = key.indexOf(":");
+        if (colonIdx !== -1) {
+          activeProjectIds.push(key.substring(colonIdx + 1));
         }
       }
+      sendJson({ type: "auth_ok", activeProjectIds });
 
-      if (!currentDevice) {
-        console.error(
-          "FATAL: No device could decrypt message - client needs to re-pair",
-        );
-        ws.close(4003, "Decryption failed - re-pair required");
-        return;
+      // Send partial responses for active streaming sessions
+      if (activeProjectIds.length > 0) {
+        const partials = loadPartialResponses();
+        for (const projectId of activeProjectIds) {
+          // Find the matching partial by checking all keys ending with this projectId
+          for (const [pKey, partial] of Object.entries(partials)) {
+            if (pKey.endsWith(`:${projectId}`) && partial) {
+              sendJson({
+                type: "streaming_restore",
+                projectId,
+                thinking: partial.thinking,
+                text: partial.text,
+                activity: partial.activity,
+              });
+              console.log(`[${connId}] Sent streaming restore for ${projectId}`);
+              break;
+            }
+          }
+        }
       }
+    }
 
-      let decrypted: string;
-      try {
-        decrypted = decrypt(encrypted, currentDevice.sharedSecret);
-      } catch (err) {
-        console.error(
-          "FATAL: Decryption failed - crypto keys mismatched. Client needs to re-pair.",
-        );
-        console.error("Error:", err);
-        ws.close(4003, "Decryption failed - re-pair required");
-        return;
-      }
-
+    ws.on("message", async (raw: Buffer) => {
       let msg: {
         type: string;
-        pin?: string;
+        password?: string;
         text?: string;
         projectId?: string;
         answers?: Array<{ header: string; answer: string }>;
       };
       try {
-        msg = JSON.parse(decrypted);
+        msg = JSON.parse(raw.toString());
       } catch (err) {
-        console.error("FATAL: Failed to parse decrypted message as JSON:", err);
-        ws.close(4004, "Invalid message format");
+        console.error("Failed to parse WebSocket message as JSON:", err);
+        ws.close(4002, "Invalid JSON");
         return;
       }
 
-      console.log(`[${currentDevice.id}] Received message type:`, msg.type);
+      console.log(`[${connId}] Received message type:`, msg.type);
 
+      // Handle auth via WebSocket (fallback if cookie not set yet)
       if (msg.type === "auth") {
         if (!checkAuthRateLimit(clientIp)) {
           console.log(`Auth rate limited for IP: ${clientIp}`);
-          sendEncrypted({
-            type: "auth_error",
-            error: "Too many attempts. Try again later.",
-          });
-          return;
-        }
-        // Check device token expiry before PIN verification
-        if (new Date(currentDevice.tokenExpiresAt) <= new Date()) {
-          console.log(
-            `Device ${currentDevice.id} token expired (${currentDevice.tokenExpiresAt})`,
-          );
-          sendEncrypted({
-            type: "auth_error",
-            error: "device_expired",
-          });
+          sendJson({ type: "auth_error", error: "Too many attempts. Try again later." });
           return;
         }
 
-        const valid = await verifyPin(msg.pin || "", pinHash);
-        if (valid) {
-          authenticated = true;
-          console.log("Auth successful");
+        if (!msg.password || !verifyPassword(msg.password)) {
+          console.log("Auth failed - invalid password");
+          recordAuthFailure(clientIp);
+          sendJson({ type: "auth_error", error: "Invalid password" });
+          return;
+        }
 
-          // Register this connection
-          connectedClients.set(currentDevice.id, ws);
+        authenticated = true;
+        connectedClients.set(connId, ws);
+        console.log("Auth successful via WebSocket");
 
-          // Find all active jobs for this device (across all projects)
-          const activeProjectIds: string[] = [];
-          for (const key of activeJobs.keys()) {
-            if (key.startsWith(`${currentDevice.id}:`)) {
-              // Extract projectId from key format "deviceId:projectId"
-              const projectId = key.substring(currentDevice.id.length + 1);
-              activeProjectIds.push(projectId);
-            } else if (key === currentDevice.id) {
-              // Legacy global job (no projectId)
-              activeProjectIds.push("__global__");
-            }
+        const activeProjectIds: string[] = [];
+        for (const key of activeJobs.keys()) {
+          const colonIdx = key.indexOf(":");
+          if (colonIdx !== -1) {
+            activeProjectIds.push(key.substring(colonIdx + 1));
           }
+        }
+        sendJson({ type: "auth_ok", activeProjectIds });
 
-          sendEncrypted({ type: "auth_ok", activeProjectIds });
-
-          // Send partial responses for any active streaming sessions
-          // This sends the accumulated content BEFORE pending events (which are deltas)
-          if (activeProjectIds.length > 0) {
-            const partials = loadPartialResponses();
-            for (const projectId of activeProjectIds) {
-              if (projectId === "__global__") continue;
-              const jKey = jobKey(currentDevice.id, projectId);
-              const partial = partials[jKey];
-              if (partial) {
-                sendEncrypted({
+        if (activeProjectIds.length > 0) {
+          const partials = loadPartialResponses();
+          for (const projectId of activeProjectIds) {
+            for (const [pKey, partial] of Object.entries(partials)) {
+              if (pKey.endsWith(`:${projectId}`) && partial) {
+                sendJson({
                   type: "streaming_restore",
                   projectId,
                   thinking: partial.thinking,
                   text: partial.text,
                   activity: partial.activity,
                 });
-                console.log(
-                  `[${currentDevice.id}] Sent streaming restore for ${projectId}`,
-                );
+                console.log(`[${connId}] Sent streaming restore for ${projectId}`);
+                break;
               }
             }
           }
-
-          // Flush any pending events from disk (but keep the file as backup)
-          // These are delta events that occurred after the partial response was saved
-          const pending = loadPendingEvents(currentDevice.id);
-          if (pending.length > 0) {
-            console.log(
-              `[${currentDevice.id}] Flushing ${pending.length} pending events from disk`,
-            );
-            for (const event of pending) {
-              const encrypted = encrypt(
-                JSON.stringify(event),
-                currentDevice.sharedSecret,
-              );
-              ws.send(JSON.stringify(encrypted));
-            }
-            // Don't clear - keep as backup log
-          }
-        } else {
-          console.log("Auth failed - invalid PIN");
-          recordAuthFailure(clientIp);
-          sendEncrypted({ type: "auth_error", error: "Invalid PIN" });
         }
-      } else if (msg.type === "list_projects") {
-        // List available projects
+        return;
+      }
+
+      if (!authenticated) {
+        sendJson({ type: "error", error: "Not authenticated" });
+        return;
+      }
+
+      if (msg.type === "list_projects") {
         const projects = listProjects();
-        sendEncrypted({ type: "projects_list", projects });
+        sendJson({ type: "projects_list", projects });
       } else if (msg.type === "message") {
-        if (!authenticated) {
-          console.log("Message rejected - not authenticated");
-          sendEncrypted({ type: "error", error: "Not authenticated" });
-          return;
-        }
-
         const userText = msg.text || "";
         const projectId = msg.projectId;
         console.log(
@@ -1496,104 +1348,35 @@ async function main() {
           projectId ? `[project: ${projectId}]` : "[global]",
         );
 
-        // Validate projectId format and existence
         let projectPath: string | undefined;
         if (projectId) {
           if (!validateProjectId(projectId)) {
-            sendEncrypted({
-              type: "error",
-              error: `Invalid project ID: ${projectId}`,
-              projectId,
-            });
+            sendJson({ type: "error", error: `Invalid project ID: ${projectId}`, projectId });
             return;
           }
           const project = getProject(projectId);
           if (!project) {
-            sendEncrypted({
-              type: "error",
-              error: `Project not found: ${projectId}`,
-              projectId,
-            });
+            sendJson({ type: "error", error: `Project not found: ${projectId}`, projectId });
             return;
           }
           projectPath = project.path;
         }
 
-        // Save user message (to project or global)
         if (projectId) {
-          addProjectMessage(projectId, {
-            role: "user",
-            content: userText,
-            timestamp: new Date().toISOString(),
-          });
+          addProjectMessage(projectId, { role: "user", content: userText, timestamp: new Date().toISOString() });
         } else {
-          addMessage({
-            role: "user",
-            content: userText,
-            timestamp: new Date().toISOString(),
-          });
+          addMessage({ role: "user", content: userText, timestamp: new Date().toISOString() });
         }
 
-        // Broadcast user message + streaming start to other devices
-        broadcastToOthers(currentDevice.id, {
-          type: "sync_user_message",
-          projectId,
-          text: userText,
-        });
+        broadcastToOthers(connId, { type: "sync_user_message", projectId, text: userText });
 
-        const jKey = jobKey(currentDevice.id, projectId);
+        const jKey = jobKey(connId, projectId);
         const abortController = new AbortController();
         activeJobs.set(jKey, abortController);
 
-        // Track assistant response
-        let assistantThinking = "";
-        let assistantText = "";
-        const assistantActivity: ToolActivity[] = [];
-        const assistantChunks: OutputChunk[] = [];
-        let lastToolName: string | null = null;
-        let currentChunkText = "";
-        const taskStartedAt = new Date().toISOString();
+        const sessionId = projectId ? getProjectSessionId(projectId) : getClaudeSessionId();
+        console.log("Using Claude session:", sessionId || "new session", projectId ? `[project: ${projectId}]` : "");
 
-        // Helper to detect if text starts a new chunk
-        const isNewChunkStart = (text: string): boolean => {
-          const trimmed = text.trim();
-          // Text after a tool always starts a new chunk
-          if (lastToolName !== null) return true;
-          // Double newline indicates new section
-          if (text.startsWith("\n\n")) return true;
-          // Common transition phrases
-          if (
-            /^(Now|Next|Let me|I'll|First|Finally|Done|After|Moving|Continuing|Great|Perfect|Looking|Based on|The |This |I |Here)/i.test(
-              trimmed,
-            )
-          )
-            return true;
-          return false;
-        };
-
-        // Helper to flush current chunk
-        const flushChunk = (afterTool?: string) => {
-          if (currentChunkText.trim()) {
-            assistantChunks.push({
-              text: currentChunkText.trim(),
-              timestamp: Date.now(),
-              afterTool,
-            });
-            currentChunkText = "";
-          }
-        };
-
-        // Get existing session ID for continuity
-        const sessionId = projectId
-          ? getProjectSessionId(projectId)
-          : getClaudeSessionId();
-        console.log(
-          "Using Claude session:",
-          sessionId || "new session",
-          projectId ? `[project: ${projectId}]` : "",
-        );
-
-        // On first resumed message after server boot, prepend context note
         const rejoinKey = projectId || "__global__";
         let messageToSend = userText;
         if (sessionId && !rejoinNoteSent.has(rejoinKey)) {
@@ -1601,297 +1384,54 @@ async function main() {
           messageToSend = `[System: This is the first message from the user since the server rebooted.]\n\n${userText}`;
         }
 
-        const deviceId = currentDevice.id;
-        const _deviceSecret = currentDevice.sharedSecret;
-
-        spawnClaude(
-          messageToSend,
-          (event: ClaudeEvent) => {
-            console.log(
-              "[ws] Claude event:",
-              event.type,
-              event.sessionId ? `sessionId=${event.sessionId}` : "",
-              projectId ? `[project: ${projectId}]` : "",
-            );
-
-            // Don't forward session_init to client, just save it
-            if (event.type === "session_init" && event.sessionId) {
-              console.log(
-                "[ws] Saving session ID:",
-                event.sessionId,
-                projectId ? `[project: ${projectId}]` : "",
-              );
-              if (projectId) {
-                saveProjectSessionId(projectId, event.sessionId);
-              } else {
-                saveClaudeSessionId(event.sessionId);
-              }
-              return;
-            }
-
-            // Transform error events: Claude uses 'text', client expects 'error'
-            let transformedEvent = event;
-            if (event.type === "error" && event.text && !("error" in event)) {
-              transformedEvent = { ...event, error: event.text };
-            }
-
-            // Include projectId in all events sent to client
-            const eventWithProject = projectId
-              ? { ...transformedEvent, projectId }
-              : transformedEvent;
-
-            // Broadcast to ALL connected clients (not just the originating device)
-            const eventJson = JSON.stringify(eventWithProject);
-            let sentToAny = false;
-            for (const [connDeviceId, connWs] of connectedClients.entries()) {
-              if (connWs.readyState === WebSocket.OPEN) {
-                const connDevice = devices.find((d) => d.id === connDeviceId);
-                if (connDevice) {
-                  const encrypted = encrypt(eventJson, connDevice.sharedSecret);
-                  connWs.send(JSON.stringify(encrypted));
-                  sentToAny = true;
-                }
-              }
-            }
-            if (!sentToAny) {
-              // No clients connected — write to disk for the originating device
-              appendEvent(deviceId, eventWithProject);
-              console.log(
-                `[${deviceId}] Event written to disk (no clients connected)`,
-              );
-            }
-
-            // Collect response for saving
-            if (event.type === "thinking" && event.text) {
-              assistantThinking += event.text;
-              savePartialResponse(
-                jKey,
-                assistantText,
-                assistantThinking,
-                assistantActivity,
-              );
-            } else if (event.type === "text" && event.text) {
-              // Check if this text starts a new chunk
-              if (isNewChunkStart(event.text) && currentChunkText.trim()) {
-                flushChunk(lastToolName || undefined);
-                lastToolName = null;
-              }
-              currentChunkText += event.text;
-              assistantText += event.text;
-              savePartialResponse(
-                jKey,
-                assistantText,
-                assistantThinking,
-                assistantActivity,
-              );
-            } else if (event.type === "tool_use" && event.toolUse) {
-              // Flush any text before tool use
-              flushChunk();
-              lastToolName = event.toolUse.tool;
-              assistantActivity.push({
-                type: "tool_use",
-                tool: event.toolUse.tool,
-                id: event.toolUse.id,
-                input: event.toolUse.input,
-                timestamp: Date.now(),
-              });
-              savePartialResponse(
-                jKey,
-                assistantText,
-                assistantThinking,
-                assistantActivity,
-              );
-
-              // Detect AskUserQuestion — store pending question for later answer
-              if (
-                event.toolUse.tool === "AskUserQuestion" &&
-                event.toolUse.id
-              ) {
-                const currentSessionId = projectId
-                  ? getProjectSessionId(projectId)
-                  : getClaudeSessionId();
-                pendingQuestions.set(jKey, {
-                  toolUseId: event.toolUse.id,
-                  questions: (event.toolUse.input.questions ||
-                    []) as PendingQuestion["questions"],
-                  projectId,
-                  sessionId: currentSessionId || "",
-                });
-                console.log(
-                  `[${deviceId}] AskUserQuestion detected, stored pending question`,
-                );
-                // Push notification for AskUserQuestion
-                const questionText =
-                  (
-                    event.toolUse.input.questions as Array<{ question: string }>
-                  )?.[0]?.question || "Claude has a question";
-                sendPushToAll("Question from Claude", questionText, "/").catch(
-                  (err) =>
-                    console.error(
-                      "[push] Failed to send AskUserQuestion push:",
-                      err,
-                    ),
-                );
-              }
-            } else if (event.type === "tool_result" && event.toolResult) {
-              assistantActivity.push({
-                type: "tool_result",
-                tool: event.toolResult.tool,
-                output: event.toolResult.output,
-                error: event.toolResult.error,
-                timestamp: Date.now(),
-              });
-              savePartialResponse(
-                jKey,
-                assistantText,
-                assistantThinking,
-                assistantActivity,
-              );
-            } else if (event.type === "done") {
-              // Flush any remaining chunk
-              flushChunk(lastToolName || undefined);
-
-              // Save assistant message when complete (to project or global)
-              if (
-                assistantText ||
-                assistantThinking ||
-                assistantActivity.length > 0
-              ) {
-                const assistantMsg: Message = {
-                  role: "assistant",
-                  content: assistantText,
-                  task: userText, // Store the original user prompt
-                  chunks:
-                    assistantChunks.length > 0 ? assistantChunks : undefined,
-                  thinking: assistantThinking || undefined,
-                  activity:
-                    assistantActivity.length > 0
-                      ? assistantActivity
-                      : undefined,
-                  startedAt: taskStartedAt,
-                  completedAt: new Date().toISOString(),
-                  timestamp: new Date().toISOString(),
-                };
-                if (projectId) {
-                  addProjectMessage(projectId, assistantMsg);
-                } else {
-                  addMessage(assistantMsg);
-                }
-              }
-              // Push notification for task completion
-              const snippet = assistantText.slice(0, 100) || "Task finished";
-              sendPushToAll("Task complete", snippet, "/").catch((err) =>
-                console.error("[push] Failed to send done push:", err),
-              );
-              // Clear pending debounced writes and partial response file
-              pendingPartials.delete(jKey);
-              clearPartialResponse(jKey);
-              // Clear active job
-              activeJobs.delete(jKey);
-              console.log(
-                `[${deviceId}] Job complete for ${projectId || "global"}, cleared from active jobs`,
-              );
-            }
+        const handler = makeClaudeEventHandler({
+          connId,
+          projectId,
+          jKey,
+          userText,
+          state: {
+            thinking: "",
+            text: "",
+            activity: [],
+            chunks: [],
+            lastToolName: null,
+            currentChunkText: "",
+            taskStartedAt: new Date().toISOString(),
           },
-          abortController.signal,
-          sessionId,
-          projectPath,
-        );
-      } else if (msg.type === "tool_answer") {
-        if (!authenticated) {
-          sendEncrypted({ type: "error", error: "Not authenticated" });
-          return;
-        }
+        });
 
+        spawnClaude(messageToSend, handler, abortController.signal, sessionId, projectPath);
+      } else if (msg.type === "tool_answer") {
         const projectId = msg.projectId;
         if (projectId && !validateProjectId(projectId)) {
-          sendEncrypted({
-            type: "error",
-            error: "Invalid project ID",
-            projectId,
-          });
+          sendJson({ type: "error", error: "Invalid project ID", projectId });
           return;
         }
 
-        const jKey = jobKey(currentDevice.id, projectId);
+        const jKey = jobKey(connId, projectId);
         const pending = pendingQuestions.get(jKey);
 
         if (!pending) {
-          sendEncrypted({
-            type: "error",
-            error: "No pending question found",
-            projectId,
-          });
+          sendJson({ type: "error", error: "No pending question found", projectId });
           return;
         }
 
-        console.log(
-          `[${currentDevice.id}] Received tool answer for ${projectId || "global"}`,
-        );
+        console.log(`[${connId}] Received tool answer for ${projectId || "global"}`);
         pendingQuestions.delete(jKey);
 
-        // Format the answer as a user message and resume the session
         const answerText = msg.answers
           ? msg.answers.map((a) => `${a.header}: ${a.answer}`).join("\n")
           : msg.text || "";
-
         const formattedAnswer = `[User answered your question]\n${answerText}`;
 
-        // Save answer as user message
         if (projectId) {
-          addProjectMessage(projectId, {
-            role: "user",
-            content: formattedAnswer,
-            timestamp: new Date().toISOString(),
-          });
+          addProjectMessage(projectId, { role: "user", content: formattedAnswer, timestamp: new Date().toISOString() });
         } else {
-          addMessage({
-            role: "user",
-            content: formattedAnswer,
-            timestamp: new Date().toISOString(),
-          });
+          addMessage({ role: "user", content: formattedAnswer, timestamp: new Date().toISOString() });
         }
 
-        // Resume session with the answer — reuse the message handling path
-        // by injecting a synthetic message event
-        msg.type = "message";
-        msg.text = formattedAnswer;
-        // Fall through won't work here, so we need to emit a new message event
-        // Instead, directly spawn Claude with the answer
         const answerAbortController = new AbortController();
         activeJobs.set(jKey, answerAbortController);
-
-        let ansAssistantThinking = "";
-        let ansAssistantText = "";
-        const ansAssistantActivity: ToolActivity[] = [];
-        const ansAssistantChunks: OutputChunk[] = [];
-        let ansLastToolName: string | null = null;
-        let ansCurrentChunkText = "";
-        const ansTaskStartedAt = new Date().toISOString();
-
-        const ansIsNewChunkStart = (text: string): boolean => {
-          const trimmed = text.trim();
-          if (ansLastToolName !== null) return true;
-          if (text.startsWith("\n\n")) return true;
-          if (
-            /^(Now|Next|Let me|I'll|First|Finally|Done|After|Moving|Continuing|Great|Perfect|Looking|Based on|The |This |I |Here)/i.test(
-              trimmed,
-            )
-          )
-            return true;
-          return false;
-        };
-
-        const ansFlushChunk = (afterTool?: string) => {
-          if (ansCurrentChunkText.trim()) {
-            ansAssistantChunks.push({
-              text: ansCurrentChunkText.trim(),
-              timestamp: Date.now(),
-              afterTool,
-            });
-            ansCurrentChunkText = "";
-          }
-        };
 
         let ansProjectPath: string | undefined;
         if (projectId) {
@@ -1899,225 +1439,50 @@ async function main() {
           if (project) ansProjectPath = project.path;
         }
 
-        const deviceId = currentDevice.id;
-        const _deviceSecret = currentDevice.sharedSecret;
-
-        spawnClaude(
-          formattedAnswer,
-          (event: ClaudeEvent) => {
-            console.log(
-              "[ws] Claude answer event:",
-              event.type,
-              projectId ? `[project: ${projectId}]` : "",
-            );
-
-            if (event.type === "session_init" && event.sessionId) {
-              if (projectId) {
-                saveProjectSessionId(projectId, event.sessionId);
-              } else {
-                saveClaudeSessionId(event.sessionId);
-              }
-              return;
-            }
-
-            let transformedEvent = event;
-            if (event.type === "error" && event.text && !("error" in event)) {
-              transformedEvent = { ...event, error: event.text };
-            }
-
-            const eventWithProject = projectId
-              ? { ...transformedEvent, projectId }
-              : transformedEvent;
-
-            const eventJson = JSON.stringify(eventWithProject);
-            let sentToAny = false;
-            for (const [connDeviceId, connWs] of connectedClients.entries()) {
-              if (connWs.readyState === WebSocket.OPEN) {
-                const connDevice = devices.find((d) => d.id === connDeviceId);
-                if (connDevice) {
-                  const encrypted = encrypt(eventJson, connDevice.sharedSecret);
-                  connWs.send(JSON.stringify(encrypted));
-                  sentToAny = true;
-                }
-              }
-            }
-            if (!sentToAny) {
-              appendEvent(deviceId, eventWithProject);
-            }
-
-            if (event.type === "thinking" && event.text) {
-              ansAssistantThinking += event.text;
-              savePartialResponse(
-                jKey,
-                ansAssistantText,
-                ansAssistantThinking,
-                ansAssistantActivity,
-              );
-            } else if (event.type === "text" && event.text) {
-              if (
-                ansIsNewChunkStart(event.text) &&
-                ansCurrentChunkText.trim()
-              ) {
-                ansFlushChunk(ansLastToolName || undefined);
-                ansLastToolName = null;
-              }
-              ansCurrentChunkText += event.text;
-              ansAssistantText += event.text;
-              savePartialResponse(
-                jKey,
-                ansAssistantText,
-                ansAssistantThinking,
-                ansAssistantActivity,
-              );
-            } else if (event.type === "tool_use" && event.toolUse) {
-              ansFlushChunk();
-              ansLastToolName = event.toolUse.tool;
-              ansAssistantActivity.push({
-                type: "tool_use",
-                tool: event.toolUse.tool,
-                id: event.toolUse.id,
-                input: event.toolUse.input,
-                timestamp: Date.now(),
-              });
-              savePartialResponse(
-                jKey,
-                ansAssistantText,
-                ansAssistantThinking,
-                ansAssistantActivity,
-              );
-
-              if (
-                event.toolUse.tool === "AskUserQuestion" &&
-                event.toolUse.id
-              ) {
-                const currentSessionId = projectId
-                  ? getProjectSessionId(projectId)
-                  : getClaudeSessionId();
-                pendingQuestions.set(jKey, {
-                  toolUseId: event.toolUse.id,
-                  questions: (event.toolUse.input.questions ||
-                    []) as PendingQuestion["questions"],
-                  projectId,
-                  sessionId: currentSessionId || "",
-                });
-                // Push notification for AskUserQuestion (answer flow)
-                const questionText =
-                  (
-                    event.toolUse.input.questions as Array<{ question: string }>
-                  )?.[0]?.question || "Claude has a question";
-                sendPushToAll("Question from Claude", questionText, "/").catch(
-                  (err) =>
-                    console.error(
-                      "[push] Failed to send AskUserQuestion push:",
-                      err,
-                    ),
-                );
-              }
-            } else if (event.type === "tool_result" && event.toolResult) {
-              ansAssistantActivity.push({
-                type: "tool_result",
-                tool: event.toolResult.tool,
-                output: event.toolResult.output,
-                error: event.toolResult.error,
-                timestamp: Date.now(),
-              });
-              savePartialResponse(
-                jKey,
-                ansAssistantText,
-                ansAssistantThinking,
-                ansAssistantActivity,
-              );
-            } else if (event.type === "done") {
-              ansFlushChunk(ansLastToolName || undefined);
-              if (
-                ansAssistantText ||
-                ansAssistantThinking ||
-                ansAssistantActivity.length > 0
-              ) {
-                const assistantMsg: Message = {
-                  role: "assistant",
-                  content: ansAssistantText,
-                  task: formattedAnswer,
-                  chunks:
-                    ansAssistantChunks.length > 0
-                      ? ansAssistantChunks
-                      : undefined,
-                  thinking: ansAssistantThinking || undefined,
-                  activity:
-                    ansAssistantActivity.length > 0
-                      ? ansAssistantActivity
-                      : undefined,
-                  startedAt: ansTaskStartedAt,
-                  completedAt: new Date().toISOString(),
-                  timestamp: new Date().toISOString(),
-                };
-                if (projectId) {
-                  addProjectMessage(projectId, assistantMsg);
-                } else {
-                  addMessage(assistantMsg);
-                }
-              }
-              // Push notification for task completion (answer flow)
-              const snippet = ansAssistantText.slice(0, 100) || "Task finished";
-              sendPushToAll("Task complete", snippet, "/").catch((err) =>
-                console.error("[push] Failed to send done push:", err),
-              );
-              pendingPartials.delete(jKey);
-              clearPartialResponse(jKey);
-              activeJobs.delete(jKey);
-            }
+        const handler = makeClaudeEventHandler({
+          connId,
+          projectId,
+          jKey,
+          userText: formattedAnswer,
+          state: {
+            thinking: "",
+            text: "",
+            activity: [],
+            chunks: [],
+            lastToolName: null,
+            currentChunkText: "",
+            taskStartedAt: new Date().toISOString(),
           },
-          answerAbortController.signal,
-          pending.sessionId,
-          ansProjectPath,
-        );
+        });
+
+        spawnClaude(formattedAnswer, handler, answerAbortController.signal, pending.sessionId, ansProjectPath);
       } else if (msg.type === "cancel") {
         if (msg.projectId && !validateProjectId(msg.projectId)) {
-          sendEncrypted({ type: "error", error: "Invalid project ID" });
+          sendJson({ type: "error", error: "Invalid project ID" });
           return;
         }
-        console.log(
-          "Cancel requested",
-          msg.projectId ? `[project: ${msg.projectId}]` : "[global]",
-        );
-        const jKey = jobKey(currentDevice.id, msg.projectId);
+        console.log("Cancel requested", msg.projectId ? `[project: ${msg.projectId}]` : "[global]");
+        const jKey = jobKey(connId, msg.projectId);
         const abortController = activeJobs.get(jKey);
         if (abortController) {
           abortController.abort();
           activeJobs.delete(jKey);
         }
-        // Notify other devices about the cancel
-        broadcastToOthers(currentDevice.id, {
-          type: "sync_cancel",
-          projectId: msg.projectId,
-        });
+        broadcastToOthers(connId, { type: "sync_cancel", projectId: msg.projectId });
       } else {
         console.log("Unknown message type:", msg.type);
       }
     });
 
     ws.on("close", () => {
-      // Don't abort - let Claude keep running
-      // Just remove from connected clients
-      if (currentDevice) {
-        connectedClients.delete(currentDevice.id);
-        console.log(
-          `[${currentDevice.id}] Client disconnected, Claude will continue running`,
-        );
-      }
+      connectedClients.delete(connId);
+      console.log(`[${connId}] Client disconnected, Claude will continue running`);
     });
   });
 
   server.listen(port, () => {
     console.log(`> Server ready on ${serverUrl}`);
     console.log(`> Client URL: ${clientUrl}`);
-    console.log(`> Paired devices: ${devices.length}`);
-    if (serverState.pairingToken) {
-      const pairUrl = `${clientUrl}/pair?server=${encodeURIComponent(serverUrl)}&token=${serverState.pairingToken}`;
-      console.log(`> Pair URL: ${pairUrl}`);
-      console.log("");
-      qrcode.generate(pairUrl, { small: true });
-    }
   });
 }
 

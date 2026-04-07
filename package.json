@@ -26,10 +26,8 @@
     "reload": "touch server.ts"
   },
   "dependencies": {
-    "argon2": "^0.44.0",
     "dotenv": "^17.2.3",
     "prismjs": "^1.30.0",
-    "qrcode-terminal": "^0.12.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "web-push": "^3.6.7",
@@ -61,7 +59,6 @@
   "packageManager": "pnpm@10.28.0",
   "pnpm": {
     "onlyBuiltDependencies": [
-      "argon2",
       "esbuild"
     ]
   }

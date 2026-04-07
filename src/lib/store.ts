@@ -9,34 +9,15 @@ import {
 import { join, basename, resolve } from "path";
 import { homedir } from "os";
 import { execSync } from "child_process";
-import argon2 from "argon2";
 
 const CONFIG_DIR = join(homedir(), ".config", "claude-remote");
 const PROJECTS_DIR = join(CONFIG_DIR, "projects");
 const DEFAULT_PROJECTS_BASE = join(homedir(), "projects");
 
-export interface Device {
-  id: string;
-  publicKey: string;
-  sharedSecret: string;
-  createdAt: string;
-  token: string;
-  tokenExpiresAt: string;
-}
-
-export interface ServerState {
-  privateKey: string;
-  publicKey: string;
-  pairingToken: string | null;
-}
-
-export interface Config {
-  pinHash: string | null;
-}
-
 export interface ToolActivity {
   type: "tool_use" | "tool_result";
   tool: string;
+  id?: string;
   input?: Record<string, unknown>;
   output?: string;
   error?: string;
@@ -93,113 +74,6 @@ export interface ProjectConversation {
 function ensureConfigDir() {
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true });
-  }
-}
-
-export function loadDevices(): Device[] {
-  try {
-    const path = join(CONFIG_DIR, "devices.json");
-    if (!existsSync(path)) return [];
-    return JSON.parse(readFileSync(path, "utf8"));
-  } catch {
-    return [];
-  }
-}
-
-export function saveDevices(devices: Device[]): void {
-  ensureConfigDir();
-  writeFileSync(
-    join(CONFIG_DIR, "devices.json"),
-    JSON.stringify(devices, null, 2),
-  );
-}
-
-export function addDevice(device: Device): void {
-  const devices = loadDevices();
-  devices.push(device);
-  saveDevices(devices);
-}
-
-export function removeDevice(deviceId: string): void {
-  const devices = loadDevices();
-  const filtered = devices.filter((d) => d.id !== deviceId);
-  saveDevices(filtered);
-}
-
-export function getDeviceById(deviceId: string): Device | null {
-  const devices = loadDevices();
-  return devices.find((d) => d.id === deviceId) || null;
-}
-
-// Legacy single device support (deprecated)
-export function loadDevice(): Device | null {
-  try {
-    const path = join(CONFIG_DIR, "device.json");
-    if (!existsSync(path)) return null;
-    return JSON.parse(readFileSync(path, "utf8"));
-  } catch {
-    return null;
-  }
-}
-
-export function saveDevice(device: Device): void {
-  ensureConfigDir();
-  writeFileSync(
-    join(CONFIG_DIR, "device.json"),
-    JSON.stringify(device, null, 2),
-  );
-}
-
-export function loadServerState(): ServerState | null {
-  try {
-    const path = join(CONFIG_DIR, "server.json");
-    if (!existsSync(path)) return null;
-    return JSON.parse(readFileSync(path, "utf8"));
-  } catch {
-    return null;
-  }
-}
-
-export function saveServerState(state: ServerState): void {
-  ensureConfigDir();
-  writeFileSync(
-    join(CONFIG_DIR, "server.json"),
-    JSON.stringify(state, null, 2),
-  );
-}
-
-export function loadConfig(): Config {
-  try {
-    const path = join(CONFIG_DIR, "config.json");
-    if (!existsSync(path)) return { pinHash: null };
-    return JSON.parse(readFileSync(path, "utf8"));
-  } catch {
-    return { pinHash: null };
-  }
-}
-
-export function saveConfig(config: Config): void {
-  ensureConfigDir();
-  writeFileSync(
-    join(CONFIG_DIR, "config.json"),
-    JSON.stringify(config, null, 2),
-  );
-}
-
-export async function hashPin(pin: string): Promise<string> {
-  return argon2.hash(pin, {
-    type: argon2.argon2id,
-    memoryCost: 65536,
-    timeCost: 3,
-    parallelism: 1,
-  });
-}
-
-export async function verifyPin(pin: string, hash: string): Promise<boolean> {
-  try {
-    return await argon2.verify(hash, pin);
-  } catch {
-    return false;
   }
 }
 

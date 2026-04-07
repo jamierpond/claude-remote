@@ -12,17 +12,10 @@ import DiffViewer from "../components/DiffViewer";
 import AskUserQuestionCard from "../components/AskUserQuestionCard";
 import { apiFetch } from "../lib/api";
 import {
-  importPublicKey,
-  deriveSharedSecret,
-  encrypt,
-  decrypt,
-  type EncryptedData,
-} from "../lib/crypto-client";
-import {
   type ServerConfig,
-  getServerPin,
-  setServerPin,
-  clearServerPin,
+  getServerPassword,
+  setServerPassword,
+  clearServerPassword,
 } from "../lib/servers";
 import {
   registerServiceWorker,
@@ -53,7 +46,7 @@ interface Message {
   completedAt?: string;
 }
 
-type View = "pin" | "chat";
+type View = "password" | "chat";
 
 interface PendingQuestionData {
   toolUseId: string;
@@ -250,10 +243,10 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
   const activeProjectKey = `claude-remote-active-project-${serverConfig.id}`;
 
   const [view, setView] = useState<View>(() => {
-    const cached = getServerPin(serverConfig.id);
-    return cached ? "chat" : "pin";
+    const cached = getServerPassword(serverConfig.id);
+    return cached ? "chat" : "password";
   });
-  const [pin, setPin] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
 
   // Multi-project state
@@ -269,8 +262,6 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
   const [showFileTree, setShowFileTree] = useState(false);
   const [showDiffViewer, setShowDiffViewer] = useState(false);
   const [showPushBanner, setShowPushBanner] = useState(false);
-  const [tokenExpiryDismissed, setTokenExpiryDismissed] = useState(false);
-  const tokenExpiresAt = serverConfig.tokenExpiresAt || null;
   const tabsRestoredRef = useRef(false);
 
   // Refs for streaming (per-project)
@@ -279,7 +270,6 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
   const activityRefs = useRef<Map<string, ToolActivity[]>>(new Map());
 
   const wsRef = useRef<WebSocket | null>(null);
-  const sharedKeyRef = useRef<CryptoKey | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Reconnection state
@@ -288,13 +278,13 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
   const [showReconnectedBanner, setShowReconnectedBanner] = useState(false);
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cachedPinRef = useRef<string | null>(null);
+  const cachedPasswordRef = useRef<string | null>(null);
   const intentionalCloseRef = useRef(false);
 
-  // Initialize cached PIN from server-specific storage
-  if (cachedPinRef.current === null) {
-    const stored = getServerPin(serverConfig.id);
-    cachedPinRef.current = stored?.pin || null;
+  // Initialize cached password from server-specific storage
+  if (cachedPasswordRef.current === null) {
+    const stored = getServerPassword(serverConfig.id);
+    cachedPasswordRef.current = stored?.password || null;
   }
 
   // Helper to update project state
@@ -487,9 +477,9 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
   }, [activeProjectId, activeProjectKey]);
 
   useEffect(() => {
-    const cachedPin = cachedPinRef.current;
-    if (cachedPin) {
-      console.log("Found cached PIN, auto-connecting...");
+    const cachedPassword = cachedPasswordRef.current;
+    if (cachedPassword) {
+      console.log("Found cached password, auto-connecting...");
 
       // Restore tabs from localStorage
       const savedProjects = localStorage.getItem(projectsKey);
@@ -520,22 +510,9 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
       setIsReconnecting(true);
       setTimeout(() => connectAndAuth(), 0);
     } else {
-      setView("pin");
+      setView("password");
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const restoreSharedKey = useCallback(async (): Promise<void> => {
-    const privateKey = await crypto.subtle.importKey(
-      "jwk",
-      JSON.parse(serverConfig.privateKey),
-      { name: "ECDH", namedCurve: "P-256" },
-      true,
-      ["deriveBits"],
-    );
-    const serverKey = await importPublicKey(serverConfig.serverPublicKey);
-    const sharedKey = await deriveSharedSecret(privateKey, serverKey);
-    sharedKeyRef.current = sharedKey;
-  }, [serverConfig]);
 
   // Schedule reconnection with exponential backoff
   const scheduleReconnect = useCallback(() => {
@@ -567,31 +544,6 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
       };
 
       ws.onmessage = async (event) => {
-        if (!sharedKeyRef.current) {
-          console.error("[ws] Received message but sharedKeyRef is null");
-          setError("Encryption key missing - please refresh the page");
-          return;
-        }
-
-        let encrypted: EncryptedData;
-        try {
-          encrypted = JSON.parse(event.data);
-        } catch (err) {
-          console.error("[ws] Failed to parse message as JSON:", err);
-          return;
-        }
-
-        let decrypted: string;
-        try {
-          decrypted = await decrypt(encrypted, sharedKeyRef.current);
-        } catch (err) {
-          console.error("[ws] Decryption failed:", err);
-          setError(
-            "Decryption failed - keys may be mismatched. Try clearing data and re-pairing.",
-          );
-          return;
-        }
-
         let msg: {
           type: string;
           text?: string;
@@ -608,9 +560,9 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
           toolResult?: { tool: string; output?: string; error?: string };
         };
         try {
-          msg = JSON.parse(decrypted);
+          msg = JSON.parse(event.data);
         } catch (err) {
-          console.error("[ws] Failed to parse decrypted message:", err);
+          console.error("[ws] Failed to parse message:", err);
           return;
         }
 
@@ -654,7 +606,7 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
                 subscribeToPush(
                   serverConfig.id,
                   serverConfig.serverUrl,
-                  serverConfig.deviceId,
+                  serverConfig.id,
                 );
               } else if (perm !== "denied") {
                 // Show banner for 'default' or 'unsupported' — let the user try
@@ -731,39 +683,27 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
         } else if (msg.type === "auth_error") {
           console.error("Auth failed:", msg.error);
 
-          if (msg.error === "device_expired") {
-            cachedPinRef.current = null;
-            clearServerPin(serverConfig.id);
-            setIsReconnecting(false);
-            setReconnectAttempt(0);
-            reconnectAttemptRef.current = 0;
-            setError(
-              "Device authorization has expired. Please re-pair this device.",
-            );
-            // Redirect to server list after a short delay
-            setTimeout(() => onNavigate("servers"), 3000);
-          } else if (
+          if (
             msg.error?.includes("Too many attempts") ||
             msg.error?.includes("rate limit")
           ) {
-            // Rate limited — don't clear PIN, just retry after a delay
             console.log("[auth] Rate limited, will retry in 10s...");
             setError("Rate limited — retrying...");
             setTimeout(() => {
-              if (cachedPinRef.current) {
+              if (cachedPasswordRef.current) {
                 connectAndAuth();
               }
             }, 10_000);
           } else {
-            cachedPinRef.current = null;
-            clearServerPin(serverConfig.id);
+            cachedPasswordRef.current = null;
+            clearServerPassword(serverConfig.id);
             setIsReconnecting(false);
             setReconnectAttempt(0);
             reconnectAttemptRef.current = 0;
             setError(
-              msg.error || "Authentication failed - please re-enter PIN",
+              msg.error || "Authentication failed - please re-enter password",
             );
-            setView("pin");
+            setView("password");
           }
         } else if (msg.type === "streaming_restore" && projectId) {
           console.log(`Restoring streaming state for ${projectId}:`, {
@@ -971,11 +911,11 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
         }
 
         if (event.code !== 1000) {
-          if (cachedPinRef.current) {
+          if (cachedPasswordRef.current) {
             scheduleReconnectRef.current();
           } else {
-            setError("Connection lost. Please re-enter PIN.");
-            setView("pin");
+            setError("Connection lost. Please re-enter password.");
+            setView("password");
           }
         }
       };
@@ -995,25 +935,42 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
 
   // Connect + authenticate
   const connectAndAuth = useCallback(async () => {
-    const pinToUse = cachedPinRef.current;
-    if (!pinToUse) {
-      console.log("[reconnect] No cached PIN, dropping to PIN screen");
+    const passwordToUse = cachedPasswordRef.current;
+    if (!passwordToUse) {
+      console.log("[reconnect] No cached password, dropping to password screen");
       setIsReconnecting(false);
       setReconnectAttempt(0);
-      setView("pin");
+      setView("password");
       return;
     }
 
-    if (!sharedKeyRef.current) {
-      try {
-        await restoreSharedKey();
-      } catch (err) {
-        console.error("[reconnect] Failed to restore shared key:", err);
-        setIsReconnecting(false);
-        setError("Encryption key restore failed - please refresh");
-        setView("pin");
-        return;
+    // First, try to log in via HTTP to get session cookie
+    try {
+      const res = await fetch(`${serverConfig.serverUrl}/api/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: passwordToUse }),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 401) {
+          cachedPasswordRef.current = null;
+          clearServerPassword(serverConfig.id);
+          setIsReconnecting(false);
+          setError(data.error || "Invalid password");
+          setView("password");
+          return;
+        }
+        if (res.status === 429) {
+          setError("Rate limited — retrying...");
+          setTimeout(() => connectAndAuth(), 10_000);
+          return;
+        }
       }
+    } catch (err) {
+      console.error("[auth] Login request failed:", err);
+      // Network error — will try WS auth as fallback
     }
 
     try {
@@ -1022,23 +979,17 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
       return;
     }
 
-    if (
-      wsRef.current &&
-      wsRef.current.readyState === WebSocket.OPEN &&
-      sharedKeyRef.current
-    ) {
+    // If cookie auth worked, the WS connection is already authenticated.
+    // Send WS auth as fallback (server accepts either cookie or message auth)
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       try {
-        const encrypted = await encrypt(
-          JSON.stringify({ type: "auth", pin: pinToUse }),
-          sharedKeyRef.current,
-        );
-        wsRef.current.send(JSON.stringify(encrypted));
+        wsRef.current.send(JSON.stringify({ type: "auth", password: passwordToUse }));
         console.log("[reconnect] Auth sent");
       } catch (err) {
         console.error("[reconnect] Failed to send auth:", err);
       }
     }
-  }, [connectWebSocket, restoreSharedKey]);
+  }, [connectWebSocket, serverConfig.serverUrl, serverConfig.id]);
 
   // Clean up reconnect timer on unmount
   useEffect(() => {
@@ -1054,16 +1005,16 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
     return () => clearTimeout(timer);
   }, [error]);
 
-  const handlePinSubmit = async (e: React.FormEvent) => {
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!pin || pin.length < 4) {
-      setError("PIN must be at least 4 digits");
+    if (!password) {
+      setError("Password is required");
       return;
     }
 
-    cachedPinRef.current = pin;
-    setServerPin(serverConfig.id, pin);
+    cachedPasswordRef.current = password;
+    setServerPassword(serverConfig.id, password);
 
     setError("");
     await connectAndAuth();
@@ -1080,11 +1031,6 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
 
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
         setError("Not connected - waiting for reconnection...");
-        return;
-      }
-
-      if (!sharedKeyRef.current) {
-        setError("Encryption key missing - please refresh the page");
         return;
       }
 
@@ -1109,11 +1055,7 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
       activityRefs.current.set(activeProjectId, []);
 
       try {
-        const encrypted = await encrypt(
-          JSON.stringify({ type: "message", text, projectId: activeProjectId }),
-          sharedKeyRef.current,
-        );
-        wsRef.current.send(JSON.stringify(encrypted));
+        wsRef.current.send(JSON.stringify({ type: "message", text, projectId: activeProjectId }));
       } catch (err) {
         console.error("[send] Failed:", err);
         setError(`Failed to send message: ${err}`);
@@ -1144,17 +1086,9 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
       isStreaming: false,
     }));
 
-    if (
-      wsRef.current &&
-      wsRef.current.readyState === WebSocket.OPEN &&
-      sharedKeyRef.current
-    ) {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       try {
-        const encrypted = await encrypt(
-          JSON.stringify({ type: "cancel", projectId: activeProjectId }),
-          sharedKeyRef.current,
-        );
-        wsRef.current.send(JSON.stringify(encrypted));
+        wsRef.current.send(JSON.stringify({ type: "cancel", projectId: activeProjectId }));
       } catch (err) {
         console.error("[cancel] WS cancel failed:", err);
       }
@@ -1170,8 +1104,7 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
       if (
         !activeProjectId ||
         !wsRef.current ||
-        wsRef.current.readyState !== WebSocket.OPEN ||
-        !sharedKeyRef.current
+        wsRef.current.readyState !== WebSocket.OPEN
       ) {
         setError("Cannot send answer - not connected");
         return;
@@ -1192,15 +1125,11 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
       activityRefs.current.set(activeProjectId, []);
 
       try {
-        const encrypted = await encrypt(
-          JSON.stringify({
-            type: "tool_answer",
-            answers,
-            projectId: activeProjectId,
-          }),
-          sharedKeyRef.current,
-        );
-        wsRef.current.send(JSON.stringify(encrypted));
+        wsRef.current.send(JSON.stringify({
+          type: "tool_answer",
+          answers,
+          projectId: activeProjectId,
+        }));
       } catch (err) {
         setError(`Failed to send answer: ${err}`);
         updateProjectState(activeProjectId, (state) => ({
@@ -1277,7 +1206,7 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
     console.log("State reset by user");
   };
 
-  if (view === "pin") {
+  if (view === "password") {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] p-4">
         <div className="w-full max-w-xs">
@@ -1287,21 +1216,19 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
           >
             &larr; Servers
           </button>
-          <h1 className="text-2xl font-bold mb-1 text-center">Enter PIN</h1>
+          <h1 className="text-2xl font-bold mb-1 text-center">Enter Password</h1>
           <p className="text-sm text-[var(--color-text-secondary)] mb-4 text-center truncate">
             {serverConfig.name}
           </p>
           {error && (
             <p className="text-red-400 text-sm mb-4 text-center">{error}</p>
           )}
-          <form onSubmit={handlePinSubmit}>
+          <form onSubmit={handlePasswordSubmit}>
             <input
               type="password"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              value={pin}
-              onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
-              placeholder="Enter PIN"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter password"
               className="w-full p-4 text-2xl text-center bg-[var(--color-bg-secondary)] rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
               autoFocus
             />
@@ -1379,13 +1306,13 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
               setIsReconnecting(false);
               setReconnectAttempt(0);
               reconnectAttemptRef.current = 0;
-              cachedPinRef.current = null;
-              clearServerPin(serverConfig.id);
-              setView("pin");
+              cachedPasswordRef.current = null;
+              clearServerPassword(serverConfig.id);
+              setView("password");
             }}
             className="ml-2 px-2 py-0.5 text-xs bg-yellow-800 hover:bg-yellow-700 rounded transition-colors"
           >
-            Use PIN
+            Re-enter password
           </button>
         </div>
       )}
@@ -1422,7 +1349,7 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
                 subscribeToPush(
                   serverConfig.id,
                   serverConfig.serverUrl,
-                  serverConfig.deviceId,
+                  serverConfig.id,
                   true,
                 ).then((ok) => {
                   if (ok) console.log("[push] Subscribed via banner");
@@ -1443,52 +1370,6 @@ export default function Chat({ serverConfig, onNavigate }: Props) {
         </div>
       )}
 
-      {/* Device token expiry warning banner */}
-      {(() => {
-        if (!tokenExpiresAt) return null;
-        const daysLeft = Math.ceil(
-          (new Date(tokenExpiresAt).getTime() - Date.now()) /
-            (1000 * 60 * 60 * 24),
-        );
-        if (daysLeft > 14) return null;
-        const isUrgent = daysLeft <= 7;
-        if (!isUrgent && tokenExpiryDismissed) return null;
-        return (
-          <div
-            className={`flex items-center justify-between px-4 py-2 border-b text-sm ${
-              isUrgent
-                ? "bg-red-900/80 border-red-700 text-red-200"
-                : "bg-yellow-900/80 border-yellow-700 text-yellow-200"
-            }`}
-          >
-            <span>
-              {daysLeft <= 0
-                ? "Device authorization has expired. Re-pair to continue."
-                : `Device authorization expires in ${daysLeft} day${daysLeft !== 1 ? "s" : ""}. Re-pair to continue access.`}
-            </span>
-            <div className="flex gap-2">
-              <button
-                onClick={() => onNavigate("servers")}
-                className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-                  isUrgent
-                    ? "bg-red-700 hover:bg-red-600 text-white"
-                    : "bg-yellow-700 hover:bg-yellow-600 text-white"
-                }`}
-              >
-                Re-pair
-              </button>
-              {!isUrgent && (
-                <button
-                  onClick={() => setTokenExpiryDismissed(true)}
-                  className="px-3 py-1 text-xs text-yellow-300 hover:text-yellow-100 transition-colors"
-                >
-                  Later
-                </button>
-              )}
-            </div>
-          </div>
-        );
-      })()}
 
       {/* Project Picker Modal */}
       <ProjectPicker
